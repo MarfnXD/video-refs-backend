@@ -9,6 +9,12 @@ services:
         sync: false
       - key: APIFY_TOKEN
         sync: false
+      - key: REPLICATE_API_TOKEN
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
       - key: ENVIRONMENT
         value: production
       - key: PORT

@@ -5,3 +5,5 @@ python-dotenv
 redis
 httpx
 pydantic
+replicate
+python-multipart
