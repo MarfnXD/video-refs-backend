@@ -154,11 +154,11 @@ class ApifyService:
 
         try:
             run_input = {
-                "postURLs": [url],
-                "resultsPerPage": 1
+                "postUrls": [url],
+                "maxItems": 1
             }
 
-            run = self.client.actor("clockworks/tiktok-scraper").call(run_input=run_input)
+            run = self.client.actor("apify/tiktok-scraper").call(run_input=run_input)
 
             items = []
             for item in self.client.dataset(run["defaultDatasetId"]).iterate_items():
