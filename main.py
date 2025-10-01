@@ -58,6 +58,23 @@ class ProcessContextResponse(BaseModel):
     error: Optional[str] = None
 
 
+class ProcessMetadataAutoRequest(BaseModel):
+    title: str
+    description: Optional[str] = None
+    hashtags: Optional[List[str]] = None
+    top_comments: Optional[List[dict]] = None
+
+
+class ProcessMetadataAutoResponse(BaseModel):
+    success: bool
+    auto_description: Optional[str] = None
+    auto_tags: Optional[List[str]] = None
+    auto_categories: Optional[List[str]] = None
+    confidence: Optional[str] = None
+    relevance_score: Optional[float] = None
+    error: Optional[str] = None
+
+
 @app.get("/")
 async def root():
     return {"message": "Video Refs Metadata API", "version": "1.0.0"}
@@ -236,6 +253,67 @@ async def process_context(
     except Exception as e:
         logger.error(f"❌ Erro em process_context: {str(e)}")
         return ProcessContextResponse(
+            success=False,
+            error=f"Erro interno: {str(e)}"
+        )
+
+
+@app.post("/api/process-metadata-auto", response_model=ProcessMetadataAutoResponse)
+async def process_metadata_auto(request: ProcessMetadataAutoRequest):
+    """
+    Processa metadados do vídeo automaticamente (sem contexto do usuário).
+
+    Analisa título, descrição, hashtags e comentários com Claude para gerar:
+    - auto_description: Resumo automático do vídeo
+    - auto_tags: Tags extraídas dos metadados
+    - auto_categories: Categorias sugeridas
+
+    Usado quando usuário pula a captura de contexto.
+    """
+    try:
+        if not request.title or not request.title.strip():
+            return ProcessMetadataAutoResponse(
+                success=False,
+                error="Título é obrigatório"
+            )
+
+        # Verificar se Claude está disponível
+        if not claude_service.is_available():
+            logger.warning("Claude API não configurada, pulando processamento automático")
+            return ProcessMetadataAutoResponse(
+                success=False,
+                error="Claude API não configurada"
+            )
+
+        # Processar metadados com Claude
+        logger.info("🤖 Processando metadados automaticamente...")
+        result = await claude_service.process_metadata_auto(
+            title=request.title,
+            description=request.description or "",
+            hashtags=request.hashtags or [],
+            top_comments=request.top_comments or []
+        )
+
+        if not result:
+            logger.warning("Claude não retornou resultado para processamento automático")
+            return ProcessMetadataAutoResponse(
+                success=False,
+                error="Falha ao processar metadados"
+            )
+
+        # Retornar sucesso com resultado processado
+        return ProcessMetadataAutoResponse(
+            success=True,
+            auto_description=result.get("auto_description"),
+            auto_tags=result.get("auto_tags", []),
+            auto_categories=result.get("auto_categories", []),
+            confidence=result.get("confidence", "medium"),
+            relevance_score=result.get("relevance_score", 0.5)
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Erro em process_metadata_auto: {str(e)}")
+        return ProcessMetadataAutoResponse(
             success=False,
             error=f"Erro interno: {str(e)}"
         )
