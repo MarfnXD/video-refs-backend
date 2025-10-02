@@ -7,5 +7,4 @@ httpx
 pydantic
 replicate
 python-multipart
-sentence-transformers
 supabase

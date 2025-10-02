@@ -2,43 +2,63 @@
 Serviço de chat com IA para busca semântica de bookmarks.
 
 Usa embeddings + busca vetorial + Claude API para conversação inteligente.
+OTIMIZADO: Usa OpenAI Embeddings API (zero memória, super barato) em vez de sentence-transformers.
 """
 
-from sentence_transformers import SentenceTransformer
 from supabase import create_client, Client
 from typing import List, Dict, Any, Optional
 import os
 import replicate
+import httpx
 
 # Configuração
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")  # NUNCA hardcode esta chave!
 REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # Validação
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError("SUPABASE_URL e SUPABASE_KEY devem estar definidas nas variáveis de ambiente!")
 
-# Clientes globais (carrega uma vez)
-_embedding_model = None  # Lazy loading para economizar memória
+# Clientes globais
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 replicate_client = replicate.Client(api_token=REPLICATE_API_TOKEN) if REPLICATE_API_TOKEN else None
 
-def _get_embedding_model():
-    """Carrega o modelo sob demanda para economizar memória."""
-    global _embedding_model
-    if _embedding_model is None:
-        _embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-    return _embedding_model
+
+async def generate_embedding(text: str) -> List[float]:
+    """
+    Gera embedding usando OpenAI API (text-embedding-3-small).
+
+    Vantagens:
+    - Zero memória no servidor (não carrega modelo)
+    - Super barato ($0.02/1M tokens = ~$0.000002 por query)
+    - Mesma dimensão que all-MiniLM-L6-v2 (384 dims)
+    - Rápido e confiável
+    """
+    if not OPENAI_API_KEY:
+        raise ValueError("OPENAI_API_KEY não configurada! Chat com IA requer OpenAI API key.")
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "https://api.openai.com/v1/embeddings",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "text-embedding-3-small",
+                "input": text,
+                "dimensions": 384  # Mesma dimensão do all-MiniLM-L6-v2
+            },
+            timeout=30.0
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data["data"][0]["embedding"]
 
 
-def generate_embedding(text: str) -> List[float]:
-    """Gera embedding para um texto usando sentence-transformers."""
-    model = _get_embedding_model()
-    return model.encode(text, convert_to_numpy=True).tolist()
-
-
-def search_bookmarks(query: str, limit: int = 10, threshold: float = 0.3) -> List[Dict[str, Any]]:
+async def search_bookmarks(query: str, limit: int = 10, threshold: float = 0.3) -> List[Dict[str, Any]]:
     """
     Busca bookmarks semanticamente similares à query.
 
@@ -50,8 +70,8 @@ def search_bookmarks(query: str, limit: int = 10, threshold: float = 0.3) -> Lis
     Returns:
         Lista de bookmarks com similarity score
     """
-    # Gera embedding da query
-    query_embedding = generate_embedding(query)
+    # Gera embedding da query via OpenAI API
+    query_embedding = await generate_embedding(query)
 
     # Busca no Supabase usando função SQL
     response = supabase.rpc(
@@ -125,7 +145,7 @@ def format_bookmark_for_llm(bookmark: Dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-def chat_with_ai(
+async def chat_with_ai(
     user_message: str,
     conversation_history: Optional[List[Dict[str, str]]] = None,
     max_bookmarks: int = 10
@@ -148,7 +168,7 @@ def chat_with_ai(
 
     # 1. Busca semântica
     print(f"🔍 Buscando bookmarks para: '{user_message}'")
-    search_results = search_bookmarks(user_message, limit=max_bookmarks, threshold=0.3)
+    search_results = await search_bookmarks(user_message, limit=max_bookmarks, threshold=0.3)
 
     if not search_results:
         return {

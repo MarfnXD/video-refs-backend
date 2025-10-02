@@ -368,7 +368,7 @@ async def chat(request: ChatRequest):
             ]
 
         # Chama serviço de chat
-        result = chat_with_ai(
+        result = await chat_with_ai(
             user_message=request.message,
             conversation_history=history,
             max_bookmarks=request.max_results or 10
