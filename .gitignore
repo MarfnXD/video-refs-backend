@@ -79,3 +79,19 @@ dump.rdb
 
 # Environment variables
 .env
+
+# Scripts com credenciais (não versionar)
+generate_embeddings.py
+generate_embeddings_local.py
+migrate_thumbnails.py
+migrate_published_dates.py
+create_bucket.py
+run_migration.py
+import_whatsapp.py
+parse_whatsapp.py
+export_failed_urls.py
+*.json
+import_log.txt
+links_nao_suportados.txt
+backend-deploy.zip
+IMPORT_WHATSAPP.md
