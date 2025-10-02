@@ -14,6 +14,7 @@ from models import VideoMetadata
 from services.apify_service import ApifyService
 from services.whisper_service import whisper_service
 from services.claude_service import claude_service
+from services.chat_service import chat_with_ai
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -316,6 +317,75 @@ async def process_metadata_auto(request: ProcessMetadataAutoRequest):
         return ProcessMetadataAutoResponse(
             success=False,
             error=f"Erro interno: {str(e)}"
+        )
+
+
+# ============================================================
+# CHAT IA - Busca Semântica Conversacional
+# ============================================================
+
+class ChatMessage(BaseModel):
+    role: str  # "user" ou "assistant"
+    content: str
+
+
+class ChatRequest(BaseModel):
+    message: str
+    conversation_history: Optional[List[ChatMessage]] = None
+    max_results: Optional[int] = 10
+
+
+class ChatResponse(BaseModel):
+    success: bool
+    message: str = None
+    bookmarks: List[dict] = []
+    total_found: int = 0
+    error: str = None
+
+
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat(request: ChatRequest):
+    """
+    Endpoint de chat conversacional com IA.
+
+    Usa busca semântica (embeddings) + Claude API para responder
+    perguntas sobre bookmarks de forma natural e contextual.
+
+    Exemplos de uso:
+    - "Preciso de vídeos com transições cinematográficas escuras"
+    - "Mostre refs de campanhas de Natal urbano"
+    - "Quero ver efeitos de água ou líquidos"
+    """
+    try:
+        logger.info(f"💬 Chat request: '{request.message}'")
+
+        # Converte histórico de conversa para formato do serviço
+        history = None
+        if request.conversation_history:
+            history = [
+                {"role": msg.role, "content": msg.content}
+                for msg in request.conversation_history
+            ]
+
+        # Chama serviço de chat
+        result = chat_with_ai(
+            user_message=request.message,
+            conversation_history=history,
+            max_bookmarks=request.max_results or 10
+        )
+
+        return ChatResponse(
+            success=True,
+            message=result["message"],
+            bookmarks=result["bookmarks"],
+            total_found=result["total_found"]
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Erro em /api/chat: {str(e)}")
+        return ChatResponse(
+            success=False,
+            error=f"Erro ao processar chat: {str(e)}"
         )
 
 
