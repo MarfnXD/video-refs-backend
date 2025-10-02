@@ -20,14 +20,22 @@ if not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError("SUPABASE_URL e SUPABASE_KEY devem estar definidas nas variáveis de ambiente!")
 
 # Clientes globais (carrega uma vez)
-embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+_embedding_model = None  # Lazy loading para economizar memória
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 replicate_client = replicate.Client(api_token=REPLICATE_API_TOKEN) if REPLICATE_API_TOKEN else None
+
+def _get_embedding_model():
+    """Carrega o modelo sob demanda para economizar memória."""
+    global _embedding_model
+    if _embedding_model is None:
+        _embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+    return _embedding_model
 
 
 def generate_embedding(text: str) -> List[float]:
     """Gera embedding para um texto usando sentence-transformers."""
-    return embedding_model.encode(text, convert_to_numpy=True).tolist()
+    model = _get_embedding_model()
+    return model.encode(text, convert_to_numpy=True).tolist()
 
 
 def search_bookmarks(query: str, limit: int = 10, threshold: float = 0.3) -> List[Dict[str, Any]]:
