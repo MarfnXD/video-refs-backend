@@ -389,6 +389,44 @@ async def chat(request: ChatRequest):
         )
 
 
+@app.post("/api/transcribe-audio")
+async def transcribe_audio(audio_file: UploadFile = File(...)):
+    """
+    Endpoint simples para transcrever áudio usando Whisper API.
+
+    Usado no chat para converter mensagens de voz em texto.
+    """
+    try:
+        logger.info(f"🎤 Transcrevendo áudio: {audio_file.filename}")
+
+        # Salva arquivo temporário
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".m4a") as temp_file:
+            content = await audio_file.read()
+            temp_file.write(content)
+            temp_path = temp_file.name
+
+        # Transcreve com Whisper
+        from services.whisper_service import WhisperService
+        whisper = WhisperService()
+        transcription = await whisper.transcribe_audio(temp_path, language="pt")
+
+        # Remove arquivo temporário
+        import os
+        os.remove(temp_path)
+
+        if transcription:
+            logger.info(f"✅ Transcrição: {transcription[:100]}...")
+            return {"success": True, "transcription": transcription}
+        else:
+            logger.error("❌ Falha na transcrição")
+            return {"success": False, "error": "Falha ao transcrever áudio"}
+
+    except Exception as e:
+        logger.error(f"❌ Erro em /api/transcribe-audio: {str(e)}")
+        return {"success": False, "error": f"Erro ao transcrever: {str(e)}"}
+
+
 @app.on_event("shutdown")
 async def shutdown_event():
     await apify_service.close()

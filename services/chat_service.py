@@ -33,7 +33,7 @@ async def generate_embedding(text: str) -> List[float]:
     Vantagens:
     - Zero memória no servidor (não carrega modelo)
     - Super barato ($0.02/1M tokens = ~$0.000002 por query)
-    - Mesma dimensão que all-MiniLM-L6-v2 (384 dims)
+    - Usa dimensão padrão do modelo (1536 dims)
     - Rápido e confiável
     """
     if not OPENAI_API_KEY:
@@ -48,8 +48,7 @@ async def generate_embedding(text: str) -> List[float]:
             },
             json={
                 "model": "text-embedding-3-small",
-                "input": text,
-                "dimensions": 384  # Mesma dimensão do all-MiniLM-L6-v2
+                "input": text
             },
             timeout=30.0
         )
@@ -101,6 +100,13 @@ def get_full_bookmark_data(bookmark_ids: List[str]) -> List[Dict[str, Any]]:
         return []
 
     response = supabase.table('bookmarks').select('*').in_('id', bookmark_ids).execute()
+
+    # DEBUG: Log thumbnails
+    if response.data:
+        for b in response.data[:3]:  # Log apenas os 3 primeiros
+            print(f"📸 DB: {b.get('title', 'No title')[:50]}")
+            print(f"   Thumbnail: {b.get('thumbnail', 'NULL')}")
+
     return response.data if response.data else []
 
 
