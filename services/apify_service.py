@@ -8,6 +8,7 @@ from models import VideoMetadata, Comment, Platform
 import httpx
 import re
 from urllib.parse import urlparse, parse_qs
+from services.storage_service import storage_service
 
 
 class ApifyService:
@@ -183,6 +184,13 @@ class ApifyService:
             text = data.get("text", "")
             hashtags = re.findall(r"#\w+", text)
 
+            # Thumbnail temporária do Apify
+            temp_thumbnail_url = data.get("imageURL", "")
+
+            # Upload para Supabase Storage (permanente)
+            permanent_thumbnail = await storage_service.upload_thumbnail(temp_thumbnail_url, url)
+            final_thumbnail_url = permanent_thumbnail if permanent_thumbnail else temp_thumbnail_url
+
             metadata = VideoMetadata(
                 url=url,
                 platform=Platform.TIKTOK,
@@ -193,7 +201,7 @@ class ApifyService:
                 likes=data.get("diggCount", 0),
                 comments_count=data.get("commentCount", 0),
                 top_comments=top_comments,
-                thumbnail_url=data.get("imageURL", ""),
+                thumbnail_url=final_thumbnail_url,
                 duration=str(data.get("videoMeta", {}).get("duration", "")),
                 author=data.get("authorMeta", {}).get("name", ""),
                 author_url=f"https://www.tiktok.com/@{data.get('authorMeta', {}).get('name', '')}",
@@ -249,6 +257,13 @@ class ApifyService:
             caption = data.get("caption", "")
             hashtags = re.findall(r"#\w+", caption)
 
+            # Thumbnail temporária do Apify
+            temp_thumbnail_url = data.get("displayUrl", "")
+
+            # Upload para Supabase Storage (permanente)
+            permanent_thumbnail = await storage_service.upload_thumbnail(temp_thumbnail_url, url)
+            final_thumbnail_url = permanent_thumbnail if permanent_thumbnail else temp_thumbnail_url
+
             metadata = VideoMetadata(
                 url=url,
                 platform=Platform.INSTAGRAM,
@@ -259,7 +274,7 @@ class ApifyService:
                 likes=data.get("likesCount", 0),
                 comments_count=data.get("commentsCount", 0),
                 top_comments=top_comments,
-                thumbnail_url=data.get("displayUrl", ""),
+                thumbnail_url=final_thumbnail_url,
                 duration=str(data.get("videoDuration", "")),
                 author=data.get("ownerUsername", ""),
                 author_url=f"https://www.instagram.com/{data.get('ownerUsername', '')}",
