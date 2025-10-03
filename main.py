@@ -14,7 +14,7 @@ from models import VideoMetadata
 from services.apify_service import ApifyService
 from services.whisper_service import whisper_service
 from services.claude_service import claude_service
-from services.chat_service import chat_with_ai
+from services.chat_service import chat_with_ai, find_similar_bookmarks
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -425,6 +425,61 @@ async def transcribe_audio(audio_file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"❌ Erro em /api/transcribe-audio: {str(e)}")
         return {"success": False, "error": f"Erro ao transcrever: {str(e)}"}
+
+
+# ============================================================
+# BUSCA POR SIMILARIDADE
+# ============================================================
+
+class FindSimilarRequest(BaseModel):
+    bookmark_id: str
+    user_id: str
+    max_results: Optional[int] = 10
+
+
+class FindSimilarResponse(BaseModel):
+    success: bool
+    bookmarks: List[dict] = []
+    total_found: int = 0
+    error: str = None
+
+
+@app.post("/api/find-similar", response_model=FindSimilarResponse)
+async def find_similar(request: FindSimilarRequest):
+    """
+    Encontra bookmarks similares a um bookmark específico.
+
+    Usa busca semântica (embeddings) para encontrar vídeos com conteúdo,
+    contexto, tags e categorias similares.
+
+    Exemplos de uso:
+    - Encontrar vídeos parecidos com um que o usuário gostou
+    - Descobrir refs similares para expandir um projeto
+    - Achar variações de uma técnica/estilo
+    """
+    try:
+        logger.info(f"🔗 Find similar request para bookmark: {request.bookmark_id}")
+
+        # Chama serviço de busca similar
+        similar_bookmarks = await find_similar_bookmarks(
+            bookmark_id=request.bookmark_id,
+            user_id=request.user_id,
+            max_results=request.max_results or 10,
+            threshold=0.5
+        )
+
+        return FindSimilarResponse(
+            success=True,
+            bookmarks=similar_bookmarks,
+            total_found=len(similar_bookmarks)
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Erro em /api/find-similar: {str(e)}")
+        return FindSimilarResponse(
+            success=False,
+            error=f"Erro ao buscar similares: {str(e)}"
+        )
 
 
 @app.on_event("shutdown")

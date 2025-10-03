@@ -151,6 +151,94 @@ def format_bookmark_for_llm(bookmark: Dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+async def find_similar_bookmarks(
+    bookmark_id: str,
+    user_id: str,
+    max_results: int = 10,
+    threshold: float = 0.5
+) -> List[Dict[str, Any]]:
+    """
+    Encontra bookmarks similares a um bookmark específico.
+
+    Args:
+        bookmark_id: ID do bookmark de referência
+        user_id: ID do usuário (para filtrar apenas seus bookmarks)
+        max_results: Máximo de resultados
+        threshold: Limiar de similaridade (0-1)
+
+    Returns:
+        Lista de bookmarks similares ordenados por relevância
+    """
+    # 1. Busca o bookmark de referência
+    ref_bookmark = supabase.table('bookmarks').select('*').eq('id', bookmark_id).single().execute()
+
+    if not ref_bookmark.data:
+        return []
+
+    ref = ref_bookmark.data
+
+    # 2. Cria query de busca combinando múltiplos campos
+    search_parts = []
+
+    # Título
+    if ref.get('title'):
+        search_parts.append(ref['title'])
+
+    # Contexto processado
+    if ref.get('user_context_processed'):
+        search_parts.append(ref['user_context_processed'])
+
+    # Descrição automática
+    if ref.get('auto_description'):
+        search_parts.append(ref['auto_description'])
+
+    # Tags (manual + auto)
+    all_tags = []
+    if ref.get('tags'):
+        all_tags.extend(ref['tags'])
+    if ref.get('auto_tags'):
+        all_tags.extend(ref['auto_tags'])
+    if all_tags:
+        search_parts.append(' '.join(all_tags))
+
+    # Categorias (manual + auto)
+    all_categories = []
+    if ref.get('categories'):
+        all_categories.extend(ref['categories'])
+    if ref.get('auto_categories'):
+        all_categories.extend(ref['auto_categories'])
+    if all_categories:
+        search_parts.append(' '.join(all_categories))
+
+    # Combina tudo
+    search_query = ' '.join(search_parts)
+
+    # 3. Busca semântica
+    print(f"🔍 Buscando similares para: '{ref.get('title', 'N/A')[:50]}...'")
+    search_results = await search_bookmarks(search_query, limit=max_results + 1, threshold=threshold)
+
+    # 4. Remove o próprio bookmark dos resultados
+    filtered_results = [r for r in search_results if r.get('id') != bookmark_id][:max_results]
+
+    # 5. Busca dados completos
+    if not filtered_results:
+        return []
+
+    bookmark_ids = [r['id'] for r in filtered_results]
+    full_bookmarks = get_full_bookmark_data(bookmark_ids)
+
+    # Ordena pelos IDs originais (mantém ordem de relevância)
+    id_to_bookmark = {b['id']: b for b in full_bookmarks}
+    sorted_bookmarks = [id_to_bookmark[bid] for bid in bookmark_ids if bid in id_to_bookmark]
+
+    # Filtra apenas bookmarks do mesmo usuário
+    user_bookmarks = [b for b in sorted_bookmarks if b.get('user_id') == user_id]
+
+    print(f"✅ Encontrados: {len(user_bookmarks)} similares")
+
+    return user_bookmarks
+
+
 async def chat_with_ai(
     user_message: str,
     conversation_history: Optional[List[Dict[str, str]]] = None,
