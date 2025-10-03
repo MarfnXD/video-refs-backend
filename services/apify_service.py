@@ -356,6 +356,124 @@ class ApifyService:
         else:
             raise ValueError(f"Plataforma não suportada: {platform}")
 
+    async def extract_video_download_url_tiktok(self, url: str, quality: str = "480p") -> dict:
+        """
+        Extrai URL de download direto do vídeo do TikTok.
+
+        Retorna:
+        - download_url: URL direta do vídeo
+        - file_size_mb: Tamanho estimado
+        - quality: Qualidade real do vídeo
+        - expires_in_hours: Validade da URL
+        """
+        try:
+            run_input = {
+                "postUrls": [url],
+                "maxItems": 1
+            }
+
+            run = self.client.actor("apify/tiktok-scraper").call(run_input=run_input)
+
+            items = []
+            for item in self.client.dataset(run["defaultDatasetId"]).iterate_items():
+                items.append(item)
+
+            if not items:
+                raise ValueError("Vídeo do TikTok não encontrado")
+
+            data = items[0]
+
+            # TikTok retorna videoUrl no campo "video"
+            video_url = None
+            file_size_mb = None
+
+            # Estrutura do TikTok Apify response:
+            # - data["video"]["downloadAddr"] = URL de download direto
+            # - data["videoMeta"]["width"], data["videoMeta"]["height"] = dimensões
+            # - data["videoMeta"]["duration"] = duração em segundos
+
+            if "video" in data:
+                video_data = data["video"]
+                # URL de download direto (HD se disponível)
+                video_url = video_data.get("downloadAddr") or video_data.get("playAddr")
+
+                # Tamanho estimado (TikTok não sempre retorna, estimamos)
+                if "videoMeta" in data:
+                    duration = data["videoMeta"].get("duration", 0)
+                    # Estimativa: ~1MB por 10 segundos em 480p
+                    file_size_mb = round((duration / 10) * 1.0, 2)
+
+            if not video_url:
+                raise ValueError("URL de vídeo não encontrada no response do TikTok")
+
+            return {
+                "download_url": video_url,
+                "file_size_mb": file_size_mb,
+                "quality": "original",  # TikTok geralmente retorna qualidade original
+                "expires_in_hours": 6,  # URLs do TikTok expiram em ~6 horas
+            }
+
+        except Exception as e:
+            raise ValueError(f"Erro ao extrair URL de download do TikTok: {str(e)}")
+
+    async def extract_video_download_url_instagram(self, url: str, quality: str = "480p") -> dict:
+        """
+        Extrai URL de download direto do vídeo do Instagram.
+
+        Retorna:
+        - download_url: URL direta do vídeo
+        - file_size_mb: Tamanho estimado
+        - quality: Qualidade real do vídeo
+        - expires_in_hours: Validade da URL
+        """
+        try:
+            run_input = {
+                "directUrls": [url],
+                "resultsType": "posts",
+                "resultsLimit": 1,
+                "searchType": "hashtag",
+                "searchLimit": 1,
+                "addParentData": False
+            }
+
+            run = self.client.actor("apify/instagram-scraper").call(
+                run_input=run_input,
+                timeout_secs=30
+            )
+
+            items = []
+            for item in self.client.dataset(run["defaultDatasetId"]).iterate_items():
+                items.append(item)
+                break
+
+            if not items:
+                raise ValueError("Vídeo do Instagram não encontrado")
+
+            data = items[0]
+
+            # Instagram retorna videoUrl no campo "videoUrl"
+            video_url = data.get("videoUrl")
+
+            if not video_url:
+                raise ValueError("URL de vídeo não encontrada no response do Instagram")
+
+            # Tamanho estimado
+            file_size_mb = None
+            if "videoDuration" in data:
+                duration = data["videoDuration"]
+                # Estimativa: ~1.5MB por 10 segundos em 480p
+                file_size_mb = round((duration / 10) * 1.5, 2)
+
+            return {
+                "download_url": video_url,
+                "file_size_mb": file_size_mb,
+                "quality": "original",  # Instagram retorna qualidade original
+                "expires_in_hours": 2,  # URLs do Instagram expiram em ~2 horas
+            }
+
+        except Exception as e:
+            raise ValueError(f"Erro ao extrair URL de download do Instagram: {str(e)}")
+
     async def close(self):
         if self.redis_client:
             await self.redis_client.close()

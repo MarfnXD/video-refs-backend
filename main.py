@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 import tempfile
 import logging
-from models import VideoMetadata
+from models import VideoMetadata, Platform
 from services.apify_service import ApifyService
 from services.whisper_service import whisper_service
 from services.claude_service import claude_service
@@ -73,6 +73,21 @@ class ProcessMetadataAutoResponse(BaseModel):
     auto_categories: Optional[List[str]] = None
     confidence: Optional[str] = None
     relevance_score: Optional[float] = None
+    error: Optional[str] = None
+
+
+class ExtractVideoUrlRequest(BaseModel):
+    url: str
+    quality: Optional[str] = "480p"  # 360p, 480p, 720p
+
+
+class ExtractVideoUrlResponse(BaseModel):
+    success: bool
+    download_url: Optional[str] = None
+    expires_in_hours: Optional[int] = None
+    file_size_mb: Optional[float] = None
+    quality: Optional[str] = None
+    platform: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -479,6 +494,113 @@ async def find_similar(request: FindSimilarRequest):
         return FindSimilarResponse(
             success=False,
             error=f"Erro ao buscar similares: {str(e)}"
+        )
+
+
+@app.post("/api/extract-video-download-url", response_model=ExtractVideoUrlResponse)
+async def extract_video_download_url(request: ExtractVideoUrlRequest):
+    """
+    Extrai URL direta do vídeo para download local no dispositivo do usuário.
+
+    IMPORTANTE:
+    - Backend NÃO armazena o vídeo
+    - URL é temporária (válida por 2-6 horas dependendo da plataforma)
+    - Apenas facilita a extração da URL de download
+    - Usuário é responsável pelo download e armazenamento local
+
+    Parâmetros:
+    - url: URL do vídeo (YouTube, Instagram, TikTok)
+    - quality: Qualidade desejada (360p, 480p, 720p) - padrão 480p
+
+    Retorna:
+    - download_url: URL direta temporária para download
+    - expires_in_hours: Tempo de validade da URL
+    - file_size_mb: Tamanho estimado do arquivo
+    - quality: Qualidade real do vídeo
+    - platform: Plataforma detectada
+    """
+    try:
+        logger.info(f"📥 Extract video download URL request: {request.url} ({request.quality})")
+
+        # Detecta plataforma
+        platform = apify_service.detect_platform(request.url)
+        logger.info(f"🎬 Plataforma detectada: {platform}")
+
+        # Por enquanto, vamos usar apenas Instagram e TikTok
+        # YouTube tem restrições de ToS mais severas
+
+        if platform == Platform.INSTAGRAM:
+            # Instagram: Usa Apify para pegar URL do vídeo
+            try:
+                video_data = await apify_service.extract_video_download_url_instagram(
+                    request.url,
+                    request.quality
+                )
+
+                logger.info(f"✅ URL de vídeo Instagram extraída com sucesso")
+
+                return ExtractVideoUrlResponse(
+                    success=True,
+                    download_url=video_data["download_url"],
+                    expires_in_hours=video_data["expires_in_hours"],
+                    file_size_mb=video_data["file_size_mb"],
+                    quality=video_data["quality"],
+                    platform="instagram"
+                )
+
+            except Exception as e:
+                logger.error(f"❌ Erro ao extrair Instagram: {str(e)}")
+                return ExtractVideoUrlResponse(
+                    success=False,
+                    error=f"Erro ao extrair vídeo do Instagram: {str(e)}"
+                )
+
+        elif platform == Platform.TIKTOK:
+            # TikTok: Usa Apify
+            try:
+                video_data = await apify_service.extract_video_download_url_tiktok(
+                    request.url,
+                    request.quality
+                )
+
+                logger.info(f"✅ URL de vídeo TikTok extraída com sucesso")
+
+                return ExtractVideoUrlResponse(
+                    success=True,
+                    download_url=video_data["download_url"],
+                    expires_in_hours=video_data["expires_in_hours"],
+                    file_size_mb=video_data["file_size_mb"],
+                    quality=video_data["quality"],
+                    platform="tiktok"
+                )
+
+            except Exception as e:
+                logger.error(f"❌ Erro ao extrair TikTok: {str(e)}")
+                return ExtractVideoUrlResponse(
+                    success=False,
+                    error=f"Erro ao extrair vídeo do TikTok: {str(e)}"
+                )
+
+        elif platform == Platform.YOUTUBE:
+            # YouTube: Por enquanto não suportado devido a ToS
+            return ExtractVideoUrlResponse(
+                success=False,
+                platform="youtube",
+                error="Download de vídeos do YouTube não é suportado devido às políticas de uso. "
+                      "Você pode visualizar o vídeo direto no YouTube através do link."
+            )
+
+        else:
+            return ExtractVideoUrlResponse(
+                success=False,
+                error=f"Plataforma não suportada: {platform}"
+            )
+
+    except Exception as e:
+        logger.error(f"❌ Erro em /api/extract-video-download-url: {str(e)}")
+        return ExtractVideoUrlResponse(
+            success=False,
+            error=f"Erro interno: {str(e)}"
         )
 
 
