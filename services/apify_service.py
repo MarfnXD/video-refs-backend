@@ -221,7 +221,8 @@ class ApifyService:
             return VideoMetadata(**cached)
 
         if not self.apify_token:
-            raise ValueError("APIFY_TOKEN não configurado")
+            # Fallback: retorna metadados básicos sem Apify
+            return await self._instagram_fallback(url)
 
         try:
             run_input = {
@@ -229,45 +230,67 @@ class ApifyService:
                 "resultsType": "posts",
                 "resultsLimit": 1,
                 "searchType": "hashtag",
-                "searchLimit": 1
+                "searchLimit": 1,
+                "addParentData": False  # Reduz dados para evitar timeouts
             }
 
-            run = self.client.actor("apify/instagram-scraper").call(run_input=run_input)
+            # Timeout reduzido para detectar falhas mais rápido
+            run = self.client.actor("apify/instagram-scraper").call(
+                run_input=run_input,
+                timeout_secs=30  # 30 segundos max
+            )
 
             items = []
             for item in self.client.dataset(run["defaultDatasetId"]).iterate_items():
                 items.append(item)
+                break  # Apenas 1 item
 
             if not items:
-                raise ValueError("Reel do Instagram não encontrado")
+                print("⚠️ Instagram scraper retornou vazio - usando fallback")
+                return await self._instagram_fallback(url)
 
             data = items[0]
 
-            # Extrair comentários se disponíveis
+            # Validação de dados essenciais
+            if not data.get("caption") and not data.get("ownerUsername"):
+                print("⚠️ Instagram scraper retornou dados incompletos - usando fallback")
+                return await self._instagram_fallback(url)
+
+            # Extrair comentários se disponíveis (com proteção)
             top_comments = []
-            if "latestComments" in data and data["latestComments"]:
-                for comment in data["latestComments"][:50]:
-                    top_comments.append(Comment(
-                        text=comment.get("text", ""),
-                        author=comment.get("ownerUsername", ""),
-                        likes=comment.get("likesCount", 0)
-                    ))
+            try:
+                if "latestComments" in data and data["latestComments"]:
+                    for comment in data["latestComments"][:50]:
+                        if comment.get("text"):  # Valida que tem texto
+                            top_comments.append(Comment(
+                                text=comment.get("text", ""),
+                                author=comment.get("ownerUsername", ""),
+                                likes=comment.get("likesCount", 0)
+                            ))
+            except Exception:
+                pass  # Ignora erros em comentários
 
             # Extrair hashtags da caption
-            caption = data.get("caption", "")
+            caption = data.get("caption", "Instagram Reel")
             hashtags = re.findall(r"#\w+", caption)
 
             # Thumbnail temporária do Apify
             temp_thumbnail_url = data.get("displayUrl", "")
 
-            # Upload para Supabase Storage (permanente)
-            permanent_thumbnail = await storage_service.upload_thumbnail(temp_thumbnail_url, url)
-            final_thumbnail_url = permanent_thumbnail if permanent_thumbnail else temp_thumbnail_url
+            # Upload para Supabase Storage (permanente) com proteção
+            final_thumbnail_url = temp_thumbnail_url
+            try:
+                if temp_thumbnail_url:
+                    permanent_thumbnail = await storage_service.upload_thumbnail(temp_thumbnail_url, url)
+                    if permanent_thumbnail:
+                        final_thumbnail_url = permanent_thumbnail
+            except Exception:
+                pass  # Usa thumbnail temporária se upload falhar
 
             metadata = VideoMetadata(
                 url=url,
                 platform=Platform.INSTAGRAM,
-                title=caption[:100] + "..." if len(caption) > 100 else caption,
+                title=caption[:100] + "..." if len(caption) > 100 else caption if caption else "Instagram Reel",
                 description=caption,
                 hashtags=hashtags,
                 views=data.get("videoViewCount", 0),
@@ -275,9 +298,9 @@ class ApifyService:
                 comments_count=data.get("commentsCount", 0),
                 top_comments=top_comments,
                 thumbnail_url=final_thumbnail_url,
-                duration=str(data.get("videoDuration", "")),
-                author=data.get("ownerUsername", ""),
-                author_url=f"https://www.instagram.com/{data.get('ownerUsername', '')}",
+                duration=str(data.get("videoDuration", "")) if data.get("videoDuration") else "",
+                author=data.get("ownerUsername", "Unknown"),
+                author_url=f"https://www.instagram.com/{data.get('ownerUsername', '')}" if data.get('ownerUsername') else "",
                 published_at=data.get("timestamp", "")
             )
 
@@ -285,7 +308,41 @@ class ApifyService:
             return metadata
 
         except Exception as e:
-            raise ValueError(f"Erro ao extrair metadados do Instagram: {str(e)}")
+            print(f"❌ Erro no Instagram scraper: {str(e)} - usando fallback")
+            return await self._instagram_fallback(url)
+
+    async def _instagram_fallback(self, url: str) -> VideoMetadata:
+        """Fallback quando Apify falha - retorna metadados básicos"""
+        # Extrai ID do reel/post da URL
+        reel_match = re.search(r'/reel/([A-Za-z0-9_-]+)', url)
+        post_match = re.search(r'/p/([A-Za-z0-9_-]+)', url)
+
+        post_id = None
+        if reel_match:
+            post_id = reel_match.group(1)
+            title = f"Instagram Reel {post_id[:8]}"
+        elif post_match:
+            post_id = post_match.group(1)
+            title = f"Instagram Post {post_id[:8]}"
+        else:
+            title = "Instagram Video"
+
+        return VideoMetadata(
+            url=url,
+            platform=Platform.INSTAGRAM,
+            title=title,
+            description="",
+            hashtags=[],
+            views=0,
+            likes=0,
+            comments_count=0,
+            top_comments=[],
+            thumbnail_url="",
+            duration="",
+            author="",
+            author_url="",
+            published_at=""
+        )
 
     async def extract_metadata(self, url: str) -> VideoMetadata:
         platform = self.detect_platform(url)
