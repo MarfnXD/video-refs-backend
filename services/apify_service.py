@@ -479,21 +479,33 @@ class ApifyService:
             return await self._extract_instagram_ytdlp(url, quality)
 
     async def _extract_instagram_ytdlp(self, url: str, quality: str = "480p") -> dict:
-        """Fallback usando yt-dlp para Instagram"""
+        """Fallback usando yt-dlp para Instagram com formato compatível Android"""
         try:
             import subprocess
             import json
 
             print(f"🔧 Tentando yt-dlp para Instagram: {url}")
 
-            # yt-dlp extrai URL do vídeo do Instagram (com cookies e headers)
+            # Definir qualidade baseada no parâmetro
+            # Força formatos com H.264 + AAC (compatível com Android)
+            quality_map = {
+                "low": "worst[ext=mp4][vcodec^=avc1]/worst",
+                "medium": "best[height<=480][ext=mp4][vcodec^=avc1]/best[height<=480]",
+                "high": "best[height<=720][ext=mp4][vcodec^=avc1]/best[height<=720]"
+            }
+            format_selector = quality_map.get(quality, "best[height<=480][ext=mp4][vcodec^=avc1]/best")
+
+            # yt-dlp com formato específico compatível com Android
+            # Prioriza H.264 (avc1) em MP4 para máxima compatibilidade
             result = subprocess.run(
                 [
                     "yt-dlp",
                     "-j",  # JSON output
                     "--no-warnings",
-                    "--no-check-certificates",  # Ignora SSL errors
+                    "--no-check-certificates",
                     "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "-f", format_selector,  # Seleciona formato compatível
+                    "--prefer-free-formats",  # Prefere formatos livres (geralmente mais compatíveis)
                     url
                 ],
                 capture_output=True,
@@ -505,7 +517,7 @@ class ApifyService:
                 print(f"⚠️ yt-dlp stderr: {result.stderr}")
                 raise ValueError(f"yt-dlp falhou: {result.stderr}")
 
-            # Limpar output (pode ter linhas extras antes do JSON)
+            # Limpar output
             stdout_lines = result.stdout.strip().split('\n')
             json_line = None
             for line in stdout_lines:
@@ -518,36 +530,19 @@ class ApifyService:
 
             data = json.loads(json_line)
 
-            # Encontrar formato adequado
-            formats = data.get("formats", [])
-            video_url = None
+            # Pegar URL do formato selecionado
+            video_url = data.get("url")
             file_size_mb = None
 
-            # Priorizar formato com vídeo + áudio
-            for fmt in formats:
-                if fmt.get("vcodec") != "none" and fmt.get("acodec") != "none":
-                    video_url = fmt.get("url")
-                    if "filesize" in fmt and fmt["filesize"]:
-                        file_size_mb = round(fmt["filesize"] / (1024 * 1024), 2)
-                    break
-
-            # Fallback: qualquer formato com vídeo
-            if not video_url:
-                for fmt in formats:
-                    if fmt.get("vcodec") != "none":
-                        video_url = fmt.get("url")
-                        if "filesize" in fmt and fmt["filesize"]:
-                            file_size_mb = round(fmt["filesize"] / (1024 * 1024), 2)
-                        break
-
-            # Último fallback: URL principal
-            if not video_url:
-                video_url = data.get("url")
+            if "filesize" in data and data["filesize"]:
+                file_size_mb = round(data["filesize"] / (1024 * 1024), 2)
+            elif "filesize_approx" in data and data["filesize_approx"]:
+                file_size_mb = round(data["filesize_approx"] / (1024 * 1024), 2)
 
             if not video_url:
                 raise ValueError("URL de vídeo não encontrada no output do yt-dlp")
 
-            print(f"✅ yt-dlp extraiu URL com sucesso")
+            print(f"✅ yt-dlp extraiu URL com sucesso (formato: {data.get('format_id')})")
             return {
                 "download_url": video_url,
                 "file_size_mb": file_size_mb,
