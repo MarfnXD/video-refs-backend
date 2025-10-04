@@ -425,58 +425,14 @@ class ApifyService:
         - file_size_mb: Tamanho estimado
         - quality: Qualidade real do vídeo
         - expires_in_hours: Validade da URL
+
+        IMPORTANTE: Usa yt-dlp diretamente para garantir formato compatível com Android.
+        Apify retorna vídeos com codec H.264 High Profile que causa problemas no ExoPlayer.
         """
-        # Tentar Apify primeiro
-        try:
-            run_input = {
-                "directUrls": [url],
-                "resultsType": "posts",
-                "resultsLimit": 1,
-                "searchType": "hashtag",
-                "searchLimit": 1,
-                "addParentData": False
-            }
-
-            run = self.client.actor("apify/instagram-scraper").call(
-                run_input=run_input,
-                timeout_secs=30
-            )
-
-            items = []
-            for item in self.client.dataset(run["defaultDatasetId"]).iterate_items():
-                items.append(item)
-                break
-
-            if not items:
-                print("⚠️ Apify Instagram vazio - tentando yt-dlp")
-                return await self._extract_instagram_ytdlp(url, quality)
-
-            data = items[0]
-
-            # Instagram retorna videoUrl no campo "videoUrl"
-            video_url = data.get("videoUrl")
-
-            if not video_url:
-                print("⚠️ Apify não retornou videoUrl - tentando yt-dlp")
-                return await self._extract_instagram_ytdlp(url, quality)
-
-            # Tamanho estimado
-            file_size_mb = None
-            if "videoDuration" in data:
-                duration = data["videoDuration"]
-                # Estimativa: ~1.5MB por 10 segundos em 480p
-                file_size_mb = round((duration / 10) * 1.5, 2)
-
-            return {
-                "download_url": video_url,
-                "file_size_mb": file_size_mb,
-                "quality": "original",  # Instagram retorna qualidade original
-                "expires_in_hours": 2,  # URLs do Instagram expiram em ~2 horas
-            }
-
-        except Exception as e:
-            print(f"❌ Apify falhou: {str(e)} - tentando yt-dlp")
-            return await self._extract_instagram_ytdlp(url, quality)
+        # Pula Apify completamente e vai direto para yt-dlp
+        # para garantir formato compatível com Android
+        print("🔧 Usando yt-dlp diretamente para Instagram (compatibilidade garantida)")
+        return await self._extract_instagram_ytdlp(url, quality)
 
     async def _extract_instagram_ytdlp(self, url: str, quality: str = "480p") -> dict:
         """Fallback usando yt-dlp para Instagram com formato compatível Android"""
