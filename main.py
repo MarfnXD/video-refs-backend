@@ -15,6 +15,7 @@ from services.apify_service import ApifyService
 from services.whisper_service import whisper_service
 from services.claude_service import claude_service
 from services.chat_service import chat_with_ai, find_similar_bookmarks
+from services.transcoding_service import TranscodingService
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -35,6 +36,7 @@ app.add_middleware(
 )
 
 apify_service = ApifyService()
+transcoding_service = TranscodingService()
 
 
 class ExtractRequest(BaseModel):
@@ -530,52 +532,82 @@ async def extract_video_download_url(request: ExtractVideoUrlRequest):
         # YouTube tem restrições de ToS mais severas
 
         if platform == Platform.INSTAGRAM:
-            # Instagram: Usa Apify para pegar URL do vídeo
+            # Instagram: Extrai URL + Transcodifica para garantir compatibilidade
             try:
+                # 1. Extrair URL original do Instagram
                 video_data = await apify_service.extract_video_download_url_instagram(
                     request.url,
                     request.quality
                 )
 
-                logger.info(f"✅ URL de vídeo Instagram extraída com sucesso")
+                logger.info(f"✅ URL de vídeo Instagram extraída: {video_data['download_url'][:50]}...")
+
+                # 2. Transcodificar para H.264 Baseline (compatível com Android)
+                logger.info(f"🎬 Iniciando transcodificação para garantir compatibilidade...")
+                transcode_result = await transcoding_service.transcode_video(video_data["download_url"])
+
+                if not transcode_result["success"]:
+                    raise ValueError(f"Falha na transcodificação: {transcode_result.get('error')}")
+
+                # 3. Retornar URL do vídeo transcodificado
+                video_id = transcode_result["video_id"]
+                base_url = os.getenv("BASE_URL", "https://video-refs-backend.onrender.com")
+                transcoded_url = f"{base_url}/api/download-transcoded/{video_id}"
+
+                logger.info(f"✅ Vídeo transcodificado com sucesso: {video_id}")
 
                 return ExtractVideoUrlResponse(
                     success=True,
-                    download_url=video_data["download_url"],
-                    expires_in_hours=video_data["expires_in_hours"],
-                    file_size_mb=video_data["file_size_mb"],
-                    quality=video_data["quality"],
+                    download_url=transcoded_url,
+                    expires_in_hours=24,  # Vídeo fica armazenado por 24h no backend
+                    file_size_mb=transcode_result["file_size_mb"],
+                    quality="baseline_h264",  # Indica que foi transcodificado
                     platform="instagram"
                 )
 
             except Exception as e:
-                logger.error(f"❌ Erro ao extrair Instagram: {str(e)}")
+                logger.error(f"❌ Erro ao processar Instagram: {str(e)}")
                 return ExtractVideoUrlResponse(
                     success=False,
                     error=f"Erro ao extrair vídeo do Instagram: {str(e)}"
                 )
 
         elif platform == Platform.TIKTOK:
-            # TikTok: Usa Apify
+            # TikTok: Extrai URL + Transcodifica para garantir compatibilidade
             try:
+                # 1. Extrair URL original do TikTok
                 video_data = await apify_service.extract_video_download_url_tiktok(
                     request.url,
                     request.quality
                 )
 
-                logger.info(f"✅ URL de vídeo TikTok extraída com sucesso")
+                logger.info(f"✅ URL de vídeo TikTok extraída: {video_data['download_url'][:50]}...")
+
+                # 2. Transcodificar para H.264 Baseline (compatível com Android)
+                logger.info(f"🎬 Iniciando transcodificação para garantir compatibilidade...")
+                transcode_result = await transcoding_service.transcode_video(video_data["download_url"])
+
+                if not transcode_result["success"]:
+                    raise ValueError(f"Falha na transcodificação: {transcode_result.get('error')}")
+
+                # 3. Retornar URL do vídeo transcodificado
+                video_id = transcode_result["video_id"]
+                base_url = os.getenv("BASE_URL", "https://video-refs-backend.onrender.com")
+                transcoded_url = f"{base_url}/api/download-transcoded/{video_id}"
+
+                logger.info(f"✅ Vídeo transcodificado com sucesso: {video_id}")
 
                 return ExtractVideoUrlResponse(
                     success=True,
-                    download_url=video_data["download_url"],
-                    expires_in_hours=video_data["expires_in_hours"],
-                    file_size_mb=video_data["file_size_mb"],
-                    quality=video_data["quality"],
+                    download_url=transcoded_url,
+                    expires_in_hours=24,  # Vídeo fica armazenado por 24h no backend
+                    file_size_mb=transcode_result["file_size_mb"],
+                    quality="baseline_h264",  # Indica que foi transcodificado
                     platform="tiktok"
                 )
 
             except Exception as e:
-                logger.error(f"❌ Erro ao extrair TikTok: {str(e)}")
+                logger.error(f"❌ Erro ao processar TikTok: {str(e)}")
                 return ExtractVideoUrlResponse(
                     success=False,
                     error=f"Erro ao extrair vídeo do TikTok: {str(e)}"
@@ -602,6 +634,94 @@ async def extract_video_download_url(request: ExtractVideoUrlRequest):
             success=False,
             error=f"Erro interno: {str(e)}"
         )
+
+
+class TranscodeVideoRequest(BaseModel):
+    source_url: str
+
+
+class TranscodeVideoResponse(BaseModel):
+    success: bool
+    video_id: str = None
+    file_size_mb: float = None
+    error: str = None
+
+
+@app.post("/api/transcode-video", response_model=TranscodeVideoResponse)
+async def transcode_video_endpoint(request: TranscodeVideoRequest):
+    """
+    Transcodifica vídeo para H.264 Baseline Profile (compatível com Android).
+
+    Args:
+        source_url: URL do vídeo original
+
+    Returns:
+        video_id: ID para baixar o vídeo transcodificado via /api/download-transcoded/{video_id}
+    """
+    try:
+        logger.info(f"🎬 Iniciando transcodificação de: {request.source_url[:50]}...")
+
+        result = await transcoding_service.transcode_video(request.source_url)
+
+        if result["success"]:
+            logger.info(f"✅ Transcodificação concluída: {result['video_id']}")
+            return TranscodeVideoResponse(
+                success=True,
+                video_id=result["video_id"],
+                file_size_mb=result["file_size_mb"],
+            )
+        else:
+            logger.error(f"❌ Erro na transcodificação: {result['error']}")
+            return TranscodeVideoResponse(
+                success=False,
+                error=result["error"],
+            )
+
+    except Exception as e:
+        logger.error(f"❌ Erro em /api/transcode-video: {str(e)}")
+        return TranscodeVideoResponse(
+            success=False,
+            error=f"Erro interno: {str(e)}",
+        )
+
+
+@app.get("/api/download-transcoded/{video_id}")
+async def download_transcoded_video(video_id: str):
+    """
+    Retorna vídeo transcodificado para download.
+    """
+    try:
+        from fastapi.responses import FileResponse
+
+        file_path = transcoding_service.get_video_path(video_id)
+
+        if not transcoding_service.video_exists(video_id):
+            raise HTTPException(status_code=404, detail="Vídeo não encontrado")
+
+        return FileResponse(
+            path=file_path,
+            media_type="video/mp4",
+            filename=f"{video_id}.mp4",
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Erro em /api/download-transcoded: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
+
+
+@app.get("/api/transcoding-stats")
+async def get_transcoding_stats():
+    """
+    Retorna estatísticas de uso de armazenamento de vídeos transcodificados.
+    """
+    try:
+        stats = transcoding_service.get_storage_usage()
+        return stats
+    except Exception as e:
+        logger.error(f"❌ Erro em /api/transcoding-stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
 
 
 @app.on_event("shutdown")
