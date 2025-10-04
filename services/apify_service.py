@@ -426,6 +426,7 @@ class ApifyService:
         - quality: Qualidade real do vídeo
         - expires_in_hours: Validade da URL
         """
+        # Tentar Apify primeiro
         try:
             run_input = {
                 "directUrls": [url],
@@ -447,7 +448,8 @@ class ApifyService:
                 break
 
             if not items:
-                raise ValueError("Vídeo do Instagram não encontrado")
+                print("⚠️ Apify Instagram vazio - tentando yt-dlp")
+                return await self._extract_instagram_ytdlp(url, quality)
 
             data = items[0]
 
@@ -455,7 +457,8 @@ class ApifyService:
             video_url = data.get("videoUrl")
 
             if not video_url:
-                raise ValueError("URL de vídeo não encontrada no response do Instagram")
+                print("⚠️ Apify não retornou videoUrl - tentando yt-dlp")
+                return await self._extract_instagram_ytdlp(url, quality)
 
             # Tamanho estimado
             file_size_mb = None
@@ -472,7 +475,89 @@ class ApifyService:
             }
 
         except Exception as e:
-            raise ValueError(f"Erro ao extrair URL de download do Instagram: {str(e)}")
+            print(f"❌ Apify falhou: {str(e)} - tentando yt-dlp")
+            return await self._extract_instagram_ytdlp(url, quality)
+
+    async def _extract_instagram_ytdlp(self, url: str, quality: str = "480p") -> dict:
+        """Fallback usando yt-dlp para Instagram"""
+        try:
+            import subprocess
+            import json
+
+            print(f"🔧 Tentando yt-dlp para Instagram: {url}")
+
+            # yt-dlp extrai URL do vídeo do Instagram (com cookies e headers)
+            result = subprocess.run(
+                [
+                    "yt-dlp",
+                    "-j",  # JSON output
+                    "--no-warnings",
+                    "--no-check-certificates",  # Ignora SSL errors
+                    "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    url
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            if result.returncode != 0:
+                print(f"⚠️ yt-dlp stderr: {result.stderr}")
+                raise ValueError(f"yt-dlp falhou: {result.stderr}")
+
+            # Limpar output (pode ter linhas extras antes do JSON)
+            stdout_lines = result.stdout.strip().split('\n')
+            json_line = None
+            for line in stdout_lines:
+                if line.startswith('{'):
+                    json_line = line
+                    break
+
+            if not json_line:
+                raise ValueError("yt-dlp não retornou JSON válido")
+
+            data = json.loads(json_line)
+
+            # Encontrar formato adequado
+            formats = data.get("formats", [])
+            video_url = None
+            file_size_mb = None
+
+            # Priorizar formato com vídeo + áudio
+            for fmt in formats:
+                if fmt.get("vcodec") != "none" and fmt.get("acodec") != "none":
+                    video_url = fmt.get("url")
+                    if "filesize" in fmt and fmt["filesize"]:
+                        file_size_mb = round(fmt["filesize"] / (1024 * 1024), 2)
+                    break
+
+            # Fallback: qualquer formato com vídeo
+            if not video_url:
+                for fmt in formats:
+                    if fmt.get("vcodec") != "none":
+                        video_url = fmt.get("url")
+                        if "filesize" in fmt and fmt["filesize"]:
+                            file_size_mb = round(fmt["filesize"] / (1024 * 1024), 2)
+                        break
+
+            # Último fallback: URL principal
+            if not video_url:
+                video_url = data.get("url")
+
+            if not video_url:
+                raise ValueError("URL de vídeo não encontrada no output do yt-dlp")
+
+            print(f"✅ yt-dlp extraiu URL com sucesso")
+            return {
+                "download_url": video_url,
+                "file_size_mb": file_size_mb,
+                "quality": quality,
+                "expires_in_hours": 2,
+            }
+
+        except Exception as e:
+            print(f"❌ yt-dlp falhou completamente: {str(e)}")
+            raise ValueError(f"Erro ao extrair URL de download do Instagram (yt-dlp): {str(e)}")
 
     async def close(self):
         if self.redis_client:
