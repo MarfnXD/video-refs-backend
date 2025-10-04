@@ -8,3 +8,4 @@ pydantic
 replicate
 python-multipart
 supabase
+yt-dlp
