@@ -484,6 +484,7 @@ class ApifyService:
         try:
             import subprocess
             import json
+            import tempfile
 
             print(f"🔧 Tentando yt-dlp para Instagram: {url}")
 
@@ -496,23 +497,47 @@ class ApifyService:
             }
             format_selector = quality_map.get(quality, "best[height<=480][ext=mp4][vcodec^=avc1]/best")
 
+            # Montar comando base
+            cmd = [
+                "yt-dlp",
+                "-j",  # JSON output
+                "--no-warnings",
+                "--no-check-certificates",
+                "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "-f", format_selector,  # Seleciona formato compatível
+                "--prefer-free-formats",  # Prefere formatos livres (geralmente mais compatíveis)
+            ]
+
+            # Adicionar cookies se configurados
+            instagram_cookies = os.getenv("INSTAGRAM_COOKIES")
+            cookies_file = None
+
+            if instagram_cookies:
+                # Criar arquivo temporário com cookies
+                cookies_file = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False)
+                cookies_file.write(instagram_cookies)
+                cookies_file.close()
+                cmd.extend(["--cookies", cookies_file.name])
+                print("🍪 Usando cookies do Instagram configurados")
+
+            cmd.append(url)
+
             # yt-dlp com formato específico compatível com Android
             # Prioriza H.264 (avc1) em MP4 para máxima compatibilidade
             result = subprocess.run(
-                [
-                    "yt-dlp",
-                    "-j",  # JSON output
-                    "--no-warnings",
-                    "--no-check-certificates",
-                    "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                    "-f", format_selector,  # Seleciona formato compatível
-                    "--prefer-free-formats",  # Prefere formatos livres (geralmente mais compatíveis)
-                    url
-                ],
+                cmd,
                 capture_output=True,
                 text=True,
                 timeout=30
             )
+
+            # Limpar arquivo de cookies temporário
+            if cookies_file:
+                try:
+                    import os as os_module
+                    os_module.unlink(cookies_file.name)
+                except:
+                    pass
 
             if result.returncode != 0:
                 print(f"⚠️ yt-dlp stderr: {result.stderr}")
