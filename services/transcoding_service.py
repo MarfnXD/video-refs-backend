@@ -112,10 +112,16 @@ class TranscodingService:
 
         Parâmetros otimizados para:
         - Compatibilidade universal com Android
+        - Velocidade de transcodificação (preset: fast)
         - Tamanho de arquivo reduzido
         - Qualidade aceitável para vídeos de referência
         """
         try:
+            # Verifica duração do vídeo antes de transcodificar
+            duration = self._get_video_duration(input_path)
+            if duration and duration > 180:  # 3 minutos
+                raise ValueError(f"Vídeo muito longo ({duration}s). Máximo: 180s. Use vídeos mais curtos.")
+
             result = subprocess.run(
                 [
                     'ffmpeg',
@@ -129,8 +135,12 @@ class TranscodingService:
                     # Qualidade: CRF 23 (balanço qualidade/tamanho)
                     '-crf', '23',
 
-                    # Preset: medium (balanço velocidade/compressão)
-                    '-preset', 'medium',
+                    # Preset: fast (30-40% mais rápido que medium)
+                    # Render Starter tem 0.5 CPU, então velocidade > compressão
+                    '-preset', 'fast',
+
+                    # Limita resolução máxima (reduz carga)
+                    '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',  # Garante dimensões pares
 
                     # Codec de áudio: AAC
                     '-c:a', 'aac',
@@ -147,7 +157,7 @@ class TranscodingService:
                 ],
                 capture_output=True,
                 text=True,
-                timeout=300  # 5 minutos timeout
+                timeout=600  # 10 minutos timeout (Render Starter é lento)
             )
 
             if result.returncode != 0:
@@ -156,9 +166,35 @@ class TranscodingService:
             print(f"✅ FFmpeg concluído com sucesso")
 
         except subprocess.TimeoutExpired:
-            raise ValueError("Transcodificação excedeu tempo limite de 5 minutos")
+            raise ValueError("Transcodificação excedeu tempo limite de 10 minutos")
         except Exception as e:
             raise ValueError(f"Erro ao executar FFmpeg: {str(e)}")
+
+    def _get_video_duration(self, video_path: str) -> float:
+        """Obtém duração do vídeo em segundos usando ffprobe."""
+        try:
+            result = subprocess.run(
+                [
+                    'ffprobe',
+                    '-v', 'error',
+                    '-show_entries', 'format=duration',
+                    '-of', 'default=noprint_wrappers=1:nokey=1',
+                    video_path
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+
+            if result.returncode == 0 and result.stdout.strip():
+                duration = float(result.stdout.strip())
+                print(f"⏱️ Duração do vídeo: {duration:.1f}s")
+                return duration
+
+            return None
+        except Exception as e:
+            print(f"⚠️ Não foi possível obter duração: {str(e)}")
+            return None
 
     def get_video_path(self, video_id: str) -> str:
         """Retorna caminho completo do vídeo transcodificado."""
