@@ -488,14 +488,15 @@ class ApifyService:
 
             print(f"🔧 Tentando yt-dlp para Instagram: {url}")
 
-            # Definir qualidade baseada no parâmetro
-            # Força formatos com H.264 + AAC (compatível com Android)
+            # Definir qualidade baseada no parâmetro com MÚLTIPLOS FALLBACKS
+            # Tenta H.264 primeiro, mas aceita qualquer formato se não houver
+            # Fallback chain: H.264+MP4 → Qualquer MP4 → Qualquer formato com altura limitada → Melhor disponível
             quality_map = {
-                "low": "worst[ext=mp4][vcodec^=avc1]/worst",
-                "medium": "best[height<=480][ext=mp4][vcodec^=avc1]/best[height<=480]",
-                "high": "best[height<=720][ext=mp4][vcodec^=avc1]/best[height<=720]"
+                "low": "worst[ext=mp4][vcodec^=avc1]/worst[ext=mp4]/worst",
+                "medium": "best[height<=480][ext=mp4][vcodec^=avc1]/best[height<=480][ext=mp4]/best[height<=480]/best",
+                "high": "best[height<=720][ext=mp4][vcodec^=avc1]/best[height<=720][ext=mp4]/best[height<=720]/best"
             }
-            format_selector = quality_map.get(quality, "best[height<=480][ext=mp4][vcodec^=avc1]/best")
+            format_selector = quality_map.get(quality, "best[height<=480][ext=mp4][vcodec^=avc1]/best[height<=480][ext=mp4]/best[height<=480]/best")
 
             # Montar comando base
             cmd = [

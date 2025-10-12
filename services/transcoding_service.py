@@ -85,26 +85,49 @@ class TranscodingService:
             if temp_input and os.path.exists(temp_input):
                 os.unlink(temp_input)
 
-    async def _download_video(self, url: str) -> str:
-        """Baixa vídeo para arquivo temporário."""
+    async def _download_video(self, url: str, max_retries: int = 3) -> str:
+        """
+        Baixa vídeo para arquivo temporário com retry automático.
+
+        Args:
+            url: URL do vídeo
+            max_retries: Número máximo de tentativas (padrão: 3)
+        """
+        import asyncio
+
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+        last_error = None
 
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                async with client.stream('GET', url) as response:
-                    response.raise_for_status()
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    wait_time = 2 ** attempt  # Exponential backoff: 2s, 4s, 8s
+                    print(f"⏳ Retry {attempt + 1}/{max_retries} após {wait_time}s...")
+                    await asyncio.sleep(wait_time)
 
-                    with open(temp_file.name, 'wb') as f:
-                        async for chunk in response.aiter_bytes(chunk_size=8192):
-                            f.write(chunk)
+                async with httpx.AsyncClient(timeout=90.0) as client:  # Aumentado de 60s → 90s
+                    async with client.stream('GET', url) as response:
+                        response.raise_for_status()
 
-            return temp_file.name
+                        with open(temp_file.name, 'wb') as f:
+                            async for chunk in response.aiter_bytes(chunk_size=8192):
+                                f.write(chunk)
 
-        except Exception as e:
-            # Limpar em caso de erro
-            if os.path.exists(temp_file.name):
-                os.unlink(temp_file.name)
-            raise ValueError(f"Erro ao baixar vídeo: {str(e)}")
+                print(f"✅ Vídeo baixado com sucesso (tentativa {attempt + 1})")
+                return temp_file.name
+
+            except Exception as e:
+                last_error = e
+                print(f"⚠️ Tentativa {attempt + 1}/{max_retries} falhou: {str(e)}")
+
+                # Se não é a última tentativa, continua
+                if attempt < max_retries - 1:
+                    continue
+
+                # Última tentativa falhou - limpar e levantar erro
+                if os.path.exists(temp_file.name):
+                    os.unlink(temp_file.name)
+                raise ValueError(f"Erro ao baixar vídeo após {max_retries} tentativas: {str(last_error)}")
 
     async def _transcode_to_baseline(self, input_path: str, output_path: str):
         """
