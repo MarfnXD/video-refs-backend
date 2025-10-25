@@ -16,6 +16,8 @@ from services.whisper_service import whisper_service
 from services.claude_service import claude_service
 from services.chat_service import chat_with_ai, find_similar_bookmarks
 from services.transcoding_service import TranscodingService
+from services.thumbnail_service import ThumbnailService
+from supabase import create_client, Client
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -38,9 +40,17 @@ app.add_middleware(
 apify_service = ApifyService()
 transcoding_service = TranscodingService()
 
+# Inicializar Supabase client para ThumbnailService
+supabase_url = os.getenv("SUPABASE_URL")
+supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+supabase_client: Client = create_client(supabase_url, supabase_key) if supabase_url and supabase_key else None
+thumbnail_service = ThumbnailService(supabase_client) if supabase_client else None
+
 
 class ExtractRequest(BaseModel):
     url: str
+    user_id: Optional[str] = None  # Para upload de thumbnail na cloud
+    bookmark_id: Optional[str] = None  # Para upload de thumbnail na cloud
 
 
 class ExtractResponse(BaseModel):
@@ -110,9 +120,12 @@ async def extract_metadata(request: ExtractRequest):
 
     Parâmetros:
     - url: URL do vídeo para extrair metadados
+    - user_id: ID do usuário (opcional, para upload de thumbnail permanente)
+    - bookmark_id: ID do bookmark (opcional, para upload de thumbnail permanente)
 
     Retorna:
     - VideoMetadata com todos os dados extraídos
+    - Se user_id e bookmark_id forem fornecidos, faz upload da thumbnail para Supabase Storage
     - Cache automático por 7 dias
     """
     try:
@@ -120,6 +133,25 @@ async def extract_metadata(request: ExtractRequest):
             raise HTTPException(status_code=400, detail="URL é obrigatória")
 
         metadata = await apify_service.extract_metadata(request.url)
+
+        # Se user_id e bookmark_id foram fornecidos E thumbnail_service está disponível,
+        # faz upload da thumbnail para Supabase Storage
+        if (request.user_id and request.bookmark_id and
+            thumbnail_service and metadata.thumbnail_url):
+
+            logger.info(f"📸 Fazendo upload de thumbnail para bookmark {request.bookmark_id}")
+
+            cloud_thumbnail_url = await thumbnail_service.upload_thumbnail(
+                thumbnail_url=metadata.thumbnail_url,
+                user_id=request.user_id,
+                bookmark_id=request.bookmark_id
+            )
+
+            if cloud_thumbnail_url:
+                metadata.cloud_thumbnail_url = cloud_thumbnail_url
+                logger.info(f"✅ Thumbnail permanente criada: {cloud_thumbnail_url[:80]}...")
+            else:
+                logger.warning("⚠️ Falha ao fazer upload de thumbnail, usando URL original")
 
         return ExtractResponse(
             success=True,
