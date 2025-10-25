@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class ThumbnailService:
     def __init__(self, supabase_client: Client):
         self.supabase = supabase_client
-        self.bucket_name = "user-videos"  # Mesmo bucket dos vídeos
+        self.bucket_name = "thumbnails"  # Bucket específico para thumbnails (aceita imagens)
 
     async def upload_thumbnail(
         self,
