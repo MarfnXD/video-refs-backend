@@ -55,7 +55,7 @@ class ExtractRequest(BaseModel):
 
 class ExtractResponse(BaseModel):
     success: bool
-    data: VideoMetadata = None
+    metadata: VideoMetadata = None  # Renomeado de 'data' para 'metadata' (compatibilidade com Flutter)
     error: str = None
 
 
@@ -155,7 +155,7 @@ async def extract_metadata(request: ExtractRequest):
 
         return ExtractResponse(
             success=True,
-            data=metadata
+            metadata=metadata  # Campo renomeado para compatibilidade com Flutter
         )
 
     except ValueError as e:
