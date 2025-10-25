@@ -29,17 +29,11 @@ class StorageService:
     def _ensure_bucket_exists(self):
         """Garante que o bucket de thumbnails existe."""
         try:
-            # Tentar listar buckets
-            buckets = self.supabase.storage.list_buckets()
-            bucket_exists = any(b['name'] == self.bucket_name for b in buckets)
-
-            if not bucket_exists:
-                # Criar bucket público
-                self.supabase.storage.create_bucket(
-                    self.bucket_name,
-                    options={"public": True}
-                )
-                print(f"✅ Bucket '{self.bucket_name}' criado")
+            # Assumir que bucket já existe (criado via migration SQL)
+            # Não precisa verificar/criar aqui pois:
+            # 1. Bucket 'user-videos' foi criado via setup_storage_bucket.sql
+            # 2. list_buckets() tem comportamento inconsistente na API
+            pass
         except Exception as e:
             print(f"⚠️ Erro ao verificar/criar bucket: {e}")
             # Bucket pode já existir
