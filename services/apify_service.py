@@ -234,10 +234,10 @@ class ApifyService:
                 "addParentData": False  # Reduz dados para evitar timeouts
             }
 
-            # Timeout reduzido para detectar falhas mais rápido
+            # Timeout aumentado - Instagram pode demorar para fazer scraping
             run = self.client.actor("apify/instagram-scraper").call(
                 run_input=run_input,
-                timeout_secs=30  # 30 segundos max
+                timeout_secs=120  # 2 minutos max
             )
 
             items = []
@@ -439,7 +439,7 @@ class ApifyService:
 
             run = self.client.actor("apify/instagram-scraper").call(
                 run_input=run_input,
-                timeout_secs=30
+                timeout_secs=120  # 2 minutos max
             )
 
             items = []
