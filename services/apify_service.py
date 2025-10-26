@@ -13,9 +13,28 @@ from services.storage_service import storage_service
 
 class ApifyService:
     def __init__(self):
-        # Suporte a múltiplas chaves Apify (separadas por vírgula)
+        # Suporte a múltiplas chaves Apify (2 formatos):
+        # Formato 1: APIFY_TOKEN="token1,token2,token3"
+        # Formato 2: APIFY_TOKEN, APIFY_TOKEN_2, APIFY_TOKEN_3, etc
+        self.apify_tokens = []
+
+        # Tenta formato 1 (comma-separated)
         apify_tokens_str = os.getenv("APIFY_TOKEN", "")
-        self.apify_tokens = [t.strip() for t in apify_tokens_str.split(',') if t.strip()]
+        if ',' in apify_tokens_str:
+            self.apify_tokens = [t.strip() for t in apify_tokens_str.split(',') if t.strip()]
+        else:
+            # Formato 2 (variáveis separadas)
+            if apify_tokens_str:
+                self.apify_tokens.append(apify_tokens_str.strip())
+
+            # Procura APIFY_TOKEN_2, APIFY_TOKEN_3, etc
+            i = 2
+            while True:
+                token = os.getenv(f"APIFY_TOKEN_{i}")
+                if not token:
+                    break
+                self.apify_tokens.append(token.strip())
+                i += 1
 
         self.youtube_api_key = os.getenv("YOUTUBE_API_KEY")
         self.redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
