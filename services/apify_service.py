@@ -13,14 +13,33 @@ from services.storage_service import storage_service
 
 class ApifyService:
     def __init__(self):
-        self.apify_token = os.getenv("APIFY_TOKEN")
+        # Suporte a múltiplas chaves Apify (separadas por vírgula)
+        apify_tokens_str = os.getenv("APIFY_TOKEN", "")
+        self.apify_tokens = [t.strip() for t in apify_tokens_str.split(',') if t.strip()]
+
         self.youtube_api_key = os.getenv("YOUTUBE_API_KEY")
         self.redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
 
-        if self.apify_token:
-            self.client = ApifyClient(self.apify_token)
+        # Cria clientes para cada token
+        self.clients = [ApifyClient(token) for token in self.apify_tokens] if self.apify_tokens else []
+        self._current_client_index = 0
+
+        # Mantém compatibilidade com código antigo
+        self.apify_token = self.apify_tokens[0] if self.apify_tokens else None
+        self.client = self.clients[0] if self.clients else None
 
         self.redis_client = None
+
+    def _get_next_client(self) -> ApifyClient:
+        """Rotaciona entre os clientes Apify (round-robin)"""
+        if not self.clients:
+            raise ValueError("Nenhum APIFY_TOKEN configurado")
+
+        client = self.clients[self._current_client_index]
+        self._current_client_index = (self._current_client_index + 1) % len(self.clients)
+
+        print(f"🔄 Usando Apify token #{self._current_client_index + 1}/{len(self.clients)}")
+        return client
 
     async def get_redis_client(self):
         if not self.redis_client:
@@ -159,10 +178,12 @@ class ApifyService:
                 "maxItems": 1
             }
 
-            run = self.client.actor("apify/tiktok-scraper").call(run_input=run_input)
+            # Usa rotação de clientes Apify
+            client = self._get_next_client()
+            run = client.actor("apify/tiktok-scraper").call(run_input=run_input)
 
             items = []
-            for item in self.client.dataset(run["defaultDatasetId"]).iterate_items():
+            for item in client.dataset(run["defaultDatasetId"]).iterate_items():
                 items.append(item)
 
             if not items:
@@ -235,13 +256,15 @@ class ApifyService:
             }
 
             # Timeout aumentado - Instagram pode demorar para fazer scraping
-            run = self.client.actor("apify/instagram-scraper").call(
+            # Usa rotação de clientes Apify
+            client = self._get_next_client()
+            run = client.actor("apify/instagram-scraper").call(
                 run_input=run_input,
                 timeout_secs=120  # 2 minutos max
             )
 
             items = []
-            for item in self.client.dataset(run["defaultDatasetId"]).iterate_items():
+            for item in client.dataset(run["defaultDatasetId"]).iterate_items():
                 items.append(item)
                 break  # Apenas 1 item
 
@@ -372,10 +395,12 @@ class ApifyService:
                 "maxItems": 1
             }
 
-            run = self.client.actor("apify/tiktok-scraper").call(run_input=run_input)
+            # Usa rotação de clientes Apify
+            client = self._get_next_client()
+            run = client.actor("apify/tiktok-scraper").call(run_input=run_input)
 
             items = []
-            for item in self.client.dataset(run["defaultDatasetId"]).iterate_items():
+            for item in client.dataset(run["defaultDatasetId"]).iterate_items():
                 items.append(item)
 
             if not items:
@@ -437,13 +462,15 @@ class ApifyService:
                 "addParentData": False
             }
 
-            run = self.client.actor("apify/instagram-scraper").call(
+            # Usa rotação de clientes Apify
+            client = self._get_next_client()
+            run = client.actor("apify/instagram-scraper").call(
                 run_input=run_input,
                 timeout_secs=120  # 2 minutos max
             )
 
             items = []
-            for item in self.client.dataset(run["defaultDatasetId"]).iterate_items():
+            for item in client.dataset(run["defaultDatasetId"]).iterate_items():
                 items.append(item)
                 break
 
