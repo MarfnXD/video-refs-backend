@@ -2,59 +2,61 @@
 Serviço de chat com IA para busca semântica de bookmarks.
 
 Usa embeddings + busca vetorial + Claude API para conversação inteligente.
-OTIMIZADO: Usa OpenAI Embeddings API (zero memória, super barato) em vez de sentence-transformers.
+OTIMIZADO: Usa Replicate Multilingual E5 Large - suporta 100 idiomas (incluindo português), 4x mais barato que OpenAI.
 """
 
 from supabase import create_client, Client
 from typing import List, Dict, Any, Optional
 import os
 import replicate
-import httpx
+import json
 
 # Configuração
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")  # NUNCA hardcode esta chave!
 REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # Validação
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError("SUPABASE_URL e SUPABASE_KEY devem estar definidas nas variáveis de ambiente!")
 
+if not REPLICATE_API_TOKEN:
+    raise ValueError("REPLICATE_API_TOKEN não configurada! Chat com IA requer Replicate API token.")
+
 # Clientes globais
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-replicate_client = replicate.Client(api_token=REPLICATE_API_TOKEN) if REPLICATE_API_TOKEN else None
+replicate_client = replicate.Client(api_token=REPLICATE_API_TOKEN)
 
 
 async def generate_embedding(text: str) -> List[float]:
     """
-    Gera embedding usando OpenAI API (text-embedding-3-small).
+    Gera embedding usando Replicate Multilingual E5 Large (multilingual-e5-large).
 
     Vantagens:
-    - Zero memória no servidor (não carrega modelo)
-    - Super barato ($0.02/1M tokens = ~$0.000002 por query)
-    - Usa dimensão padrão do modelo (1536 dims)
-    - Rápido e confiável
+    - Suporta 100 idiomas (incluindo português!)
+    - Recomendado pelo Replicate como melhor opção multilíngue
+    - 4x mais barato que OpenAI
+    - Zero memória no servidor (API externa)
+    - 1024 dimensões (vs 1536 do OpenAI)
+    - Mesmo token do Replicate que já usamos
+    - Baseado em XLM-RoBERTa (560M parâmetros)
     """
-    if not OPENAI_API_KEY:
-        raise ValueError("OPENAI_API_KEY não configurada! Chat com IA requer OpenAI API key.")
+    if not replicate_client:
+        raise ValueError("Replicate client não inicializado!")
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            "https://api.openai.com/v1/embeddings",
-            headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "text-embedding-3-small",
-                "input": text
-            },
-            timeout=30.0
-        )
-        response.raise_for_status()
-        data = response.json()
-        return data["data"][0]["embedding"]
+    # Chama modelo Multilingual E5 Large via Replicate
+    output = replicate_client.run(
+        "beautyyuyanli/multilingual-e5-large:96e52c11bf0097a6edef71154ac58f654e85bb92c4b14842f91ff1ee30a676e6",
+        input={"texts": json.dumps([text])}
+    )
+
+    # Output é um array de embeddings (pegamos o primeiro)
+    # Nota: output vem como generator, precisamos consumir
+    embeddings = list(output)
+    if not embeddings or len(embeddings) == 0:
+        raise ValueError("Replicate não retornou embeddings")
+
+    return embeddings[0]  # Retorna primeiro embedding (1024 dims)
 
 
 async def search_bookmarks(query: str, limit: int = 10, threshold: float = 0.3) -> List[Dict[str, Any]]:
