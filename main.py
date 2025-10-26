@@ -832,27 +832,11 @@ async def process_video_to_supabase(request: ProcessToSupabaseRequest):
         download_url = video_data["download_url"]
         logger.info(f"✅ URL extraída: {download_url[:50]}...")
 
-        # 2. Baixar vídeo no backend
-        logger.info(f"⬇️  Baixando vídeo...")
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.get(download_url)
-            response.raise_for_status()
-            video_content = response.content
-
-        logger.info(f"✅ Vídeo baixado: {len(video_content) / 1024 / 1024:.2f}MB")
-
-        # 3. Salvar temporariamente
-        import tempfile
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_file:
-            temp_file.write(video_content)
-            temp_path = temp_file.name
-
-        # 4. Transcodificar com FFmpeg
-        logger.info(f"🎬 Transcodificando...")
-        transcode_result = await transcoding_service.transcode_video_from_file(temp_path)
+        # 2. Transcodificar (baixa + FFmpeg)
+        logger.info(f"🎬 Baixando e transcodificando...")
+        transcode_result = await transcoding_service.transcode_video(download_url)
 
         if not transcode_result["success"]:
-            os.unlink(temp_path)
             raise ValueError(f"Falha na transcodificação: {transcode_result.get('error')}")
 
         transcoded_path = transcode_result["file_path"]
@@ -860,7 +844,7 @@ async def process_video_to_supabase(request: ProcessToSupabaseRequest):
 
         logger.info(f"✅ Transcodificado: {file_size_mb:.2f}MB")
 
-        # 5. Upload direto para Supabase Storage
+        # 3. Upload direto para Supabase Storage
         logger.info(f"☁️  Fazendo upload para Supabase...")
 
         storage_path = f"{request.user_id}/{request.bookmark_id}.mp4"
@@ -880,7 +864,7 @@ async def process_video_to_supabase(request: ProcessToSupabaseRequest):
 
         logger.info(f"✅ Upload concluído!")
 
-        # 6. Atualizar bookmark no Supabase
+        # 4. Atualizar bookmark no Supabase
         supabase_client.table('bookmarks').update({
             'cloud_video_url': cloud_url,
             'cloud_upload_status': 'completed',
@@ -891,8 +875,7 @@ async def process_video_to_supabase(request: ProcessToSupabaseRequest):
 
         logger.info(f"✅ Bookmark atualizado!")
 
-        # 7. Limpar arquivos temporários
-        os.unlink(temp_path)
+        # 5. Limpar arquivo transcodificado
         os.unlink(transcoded_path)
 
         return ProcessToSupabaseResponse(
