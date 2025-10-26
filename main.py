@@ -783,6 +783,132 @@ async def get_transcoding_stats():
         raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
 
 
+class ProcessToSupabaseRequest(BaseModel):
+    url: str
+    user_id: str
+    bookmark_id: str
+    quality: str = "720p"
+
+
+class ProcessToSupabaseResponse(BaseModel):
+    success: bool
+    cloud_url: str = None
+    file_size_mb: float = None
+    error: str = None
+
+
+@app.post("/api/process-to-supabase", response_model=ProcessToSupabaseResponse)
+async def process_video_to_supabase(request: ProcessToSupabaseRequest):
+    """
+    Processa vídeo COMPLETO e faz upload direto para Supabase Storage.
+
+    Fluxo:
+    1. Apify extrai URL do vídeo
+    2. Backend baixa vídeo
+    3. FFmpeg transcodifica (H.264 Baseline)
+    4. Upload direto para Supabase Storage
+    5. Atualiza bookmark no Supabase
+    6. Retorna apenas sucesso/falha
+
+    VANTAGEM: Vídeo NÃO trafega para o PC - tudo servidor→servidor
+    """
+    import httpx
+    from datetime import datetime
+
+    try:
+        logger.info(f"🚀 Processando vídeo para Supabase: {request.url}")
+
+        # 1. Detectar plataforma e extrair URL
+        platform = apify_service.detect_platform(request.url)
+        logger.info(f"🎬 Plataforma: {platform}")
+
+        if platform == Platform.INSTAGRAM:
+            video_data = await apify_service.extract_video_download_url_instagram(request.url, request.quality)
+        elif platform == Platform.TIKTOK:
+            video_data = await apify_service.extract_video_download_url_tiktok(request.url, request.quality)
+        else:
+            raise ValueError(f"Plataforma não suportada: {platform}")
+
+        download_url = video_data["download_url"]
+        logger.info(f"✅ URL extraída: {download_url[:50]}...")
+
+        # 2. Baixar vídeo no backend
+        logger.info(f"⬇️  Baixando vídeo...")
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.get(download_url)
+            response.raise_for_status()
+            video_content = response.content
+
+        logger.info(f"✅ Vídeo baixado: {len(video_content) / 1024 / 1024:.2f}MB")
+
+        # 3. Salvar temporariamente
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_file:
+            temp_file.write(video_content)
+            temp_path = temp_file.name
+
+        # 4. Transcodificar com FFmpeg
+        logger.info(f"🎬 Transcodificando...")
+        transcode_result = await transcoding_service.transcode_video_from_file(temp_path)
+
+        if not transcode_result["success"]:
+            os.unlink(temp_path)
+            raise ValueError(f"Falha na transcodificação: {transcode_result.get('error')}")
+
+        transcoded_path = transcode_result["file_path"]
+        file_size_mb = transcode_result["file_size_mb"]
+
+        logger.info(f"✅ Transcodificado: {file_size_mb:.2f}MB")
+
+        # 5. Upload direto para Supabase Storage
+        logger.info(f"☁️  Fazendo upload para Supabase...")
+
+        storage_path = f"{request.user_id}/{request.bookmark_id}.mp4"
+
+        with open(transcoded_path, 'rb') as f:
+            supabase_client.storage.from_('user-videos').upload(
+                storage_path,
+                f,
+                file_options={"content-type": "video/mp4"}
+            )
+
+        # Gerar URL assinada
+        cloud_url = supabase_client.storage.from_('user-videos').create_signed_url(
+            storage_path,
+            expires_in=31536000  # 1 ano
+        )['signedURL']
+
+        logger.info(f"✅ Upload concluído!")
+
+        # 6. Atualizar bookmark no Supabase
+        supabase_client.table('bookmarks').update({
+            'cloud_video_url': cloud_url,
+            'cloud_upload_status': 'completed',
+            'cloud_uploaded_at': datetime.utcnow().isoformat(),
+            'cloud_file_size_bytes': int(file_size_mb * 1024 * 1024),
+            'video_quality': request.quality,
+        }).eq('id', request.bookmark_id).execute()
+
+        logger.info(f"✅ Bookmark atualizado!")
+
+        # 7. Limpar arquivos temporários
+        os.unlink(temp_path)
+        os.unlink(transcoded_path)
+
+        return ProcessToSupabaseResponse(
+            success=True,
+            cloud_url=cloud_url,
+            file_size_mb=file_size_mb
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Erro em /api/process-to-supabase: {str(e)}")
+        return ProcessToSupabaseResponse(
+            success=False,
+            error=str(e)
+        )
+
+
 @app.on_event("shutdown")
 async def shutdown_event():
     await apify_service.close()
