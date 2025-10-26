@@ -830,9 +830,41 @@ async def process_video_to_supabase(request: ProcessToSupabaseRequest):
             raise ValueError(f"Plataforma não suportada: {platform}")
 
         download_url = video_data["download_url"]
+        thumbnail_url = video_data.get("thumbnail_url")  # Apify retorna thumbnail
         logger.info(f"✅ URL extraída: {download_url[:50]}...")
 
-        # 2. Transcodificar (baixa + FFmpeg)
+        # 2. Baixar e salvar thumbnail (se disponível)
+        cloud_thumbnail_url = None
+        if thumbnail_url:
+            try:
+                logger.info(f"📸 Baixando thumbnail...")
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    thumb_response = await client.get(thumbnail_url)
+                    thumb_response.raise_for_status()
+                    thumbnail_data = thumb_response.content
+
+                # Upload thumbnail para Supabase Storage
+                thumbnail_storage_path = f"{request.user_id}/thumbnails/{request.bookmark_id}.jpg"
+
+                import io
+                supabase_client.storage.from_('user-videos').upload(
+                    thumbnail_storage_path,
+                    io.BytesIO(thumbnail_data),
+                    file_options={"content-type": "image/jpeg"}
+                )
+
+                # Gerar URL assinada para thumbnail
+                cloud_thumbnail_url = supabase_client.storage.from_('user-videos').create_signed_url(
+                    thumbnail_storage_path,
+                    expires_in=31536000  # 1 ano
+                )['signedURL']
+
+                logger.info(f"✅ Thumbnail salva!")
+            except Exception as thumb_error:
+                logger.warning(f"⚠️  Erro ao salvar thumbnail (não crítico): {str(thumb_error)}")
+                # Não falha o processo se thumbnail falhar
+
+        # 3. Transcodificar (baixa + FFmpeg)
         logger.info(f"🎬 Baixando e transcodificando...")
         transcode_result = await transcoding_service.transcode_video(download_url)
 
@@ -865,13 +897,19 @@ async def process_video_to_supabase(request: ProcessToSupabaseRequest):
         logger.info(f"✅ Upload concluído!")
 
         # 4. Atualizar bookmark no Supabase
-        supabase_client.table('bookmarks').update({
+        update_data = {
             'cloud_video_url': cloud_url,
             'cloud_upload_status': 'completed',
             'cloud_uploaded_at': datetime.utcnow().isoformat(),
             'cloud_file_size_bytes': int(file_size_mb * 1024 * 1024),
             'video_quality': request.quality,
-        }).eq('id', request.bookmark_id).execute()
+        }
+
+        # Adiciona thumbnail URL se disponível
+        if cloud_thumbnail_url:
+            update_data['cloud_thumbnail_url'] = cloud_thumbnail_url
+
+        supabase_client.table('bookmarks').update(update_data).eq('id', request.bookmark_id).execute()
 
         logger.info(f"✅ Bookmark atualizado!")
 
