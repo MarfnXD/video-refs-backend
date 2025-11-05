@@ -2,61 +2,60 @@
 Serviço de chat com IA para busca semântica de bookmarks.
 
 Usa embeddings + busca vetorial + Claude API para conversação inteligente.
-OTIMIZADO: Usa Replicate Multilingual E5 Large - suporta 100 idiomas (incluindo português), 4x mais barato que OpenAI.
+Usa OpenAI para embeddings (text-embedding-3-small, 1536 dims).
 """
 
 from supabase import create_client, Client
 from typing import List, Dict, Any, Optional
 import os
+from openai import OpenAI
 import replicate
-import json
 
 # Configuração
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")  # NUNCA hardcode esta chave!
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
 
 # Validação
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError("SUPABASE_URL e SUPABASE_KEY devem estar definidas nas variáveis de ambiente!")
 
-if not REPLICATE_API_TOKEN:
-    raise ValueError("REPLICATE_API_TOKEN não configurada! Chat com IA requer Replicate API token.")
+if not OPENAI_API_KEY:
+    raise ValueError("OPENAI_API_KEY não configurada! Chat com IA requer OpenAI API token.")
 
 # Clientes globais
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-replicate_client = replicate.Client(api_token=REPLICATE_API_TOKEN)
+openai_client = OpenAI(api_key=OPENAI_API_KEY)
+replicate_client = replicate.Client(api_token=REPLICATE_API_TOKEN) if REPLICATE_API_TOKEN else None
 
 
 async def generate_embedding(text: str) -> List[float]:
     """
-    Gera embedding usando Replicate Multilingual E5 Large (multilingual-e5-large).
+    Gera embedding usando OpenAI text-embedding-3-small.
 
     Vantagens:
-    - Suporta 100 idiomas (incluindo português!)
-    - Recomendado pelo Replicate como melhor opção multilíngue
-    - 4x mais barato que OpenAI
-    - Zero memória no servidor (API externa)
-    - 1024 dimensões (vs 1536 do OpenAI)
-    - Mesmo token do Replicate que já usamos
-    - Baseado em XLM-RoBERTa (560M parâmetros)
+    - Alta qualidade e precisão
+    - Suporta 100+ idiomas (incluindo português)
+    - 1536 dimensões
+    - API estável e confiável
     """
-    if not replicate_client:
-        raise ValueError("Replicate client não inicializado!")
+    if not openai_client:
+        raise ValueError("OpenAI client não inicializado!")
 
-    # Chama modelo Multilingual E5 Large via Replicate
-    output = replicate_client.run(
-        "beautyyuyanli/multilingual-e5-large:96e52c11bf0097a6edef71154ac58f654e85bb92c4b14842f91ff1ee30a676e6",
-        input={"texts": json.dumps([text])}
+    # Chama OpenAI API
+    response = openai_client.embeddings.create(
+        model="text-embedding-3-small",
+        input=text
     )
 
-    # Output é um array de embeddings (pegamos o primeiro)
-    # Nota: output vem como generator, precisamos consumir
-    embeddings = list(output)
-    if not embeddings or len(embeddings) == 0:
-        raise ValueError("Replicate não retornou embeddings")
+    # Extrai embedding (1536 dimensões)
+    embedding = response.data[0].embedding
 
-    return embeddings[0]  # Retorna primeiro embedding (1024 dims)
+    if not embedding or len(embedding) == 0:
+        raise ValueError("OpenAI não retornou embeddings")
+
+    return embedding
 
 
 async def search_bookmarks(query: str, limit: int = 10, threshold: float = 0.3) -> List[Dict[str, Any]]:
@@ -308,31 +307,25 @@ Bookmarks encontrados (já ordenados por relevância):
 
 Analise esses bookmarks e responda ao usuário de forma conversacional, destacando os mais relevantes e explicando por que são úteis para a pergunta dele."""
 
-    # 5. Chama Claude via Replicate
-    if replicate_client:
-        try:
-            # Monta prompt final combinando system + user
-            final_prompt = f"{system_prompt}\n\n{user_prompt}"
+    # 5. Chama OpenAI GPT-4 para gerar resposta conversacional
+    try:
+        # Chama OpenAI Chat Completion API
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",  # Mais rápido e barato que GPT-4
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            max_tokens=1024,
+            temperature=0.7,
+        )
 
-            # Chama Claude via Replicate
-            output = replicate_client.run(
-                "anthropic/claude-3.5-sonnet",
-                input={
-                    "prompt": final_prompt,
-                    "max_tokens": 1024,
-                    "temperature": 0.7,
-                }
-            )
+        # Extrai resposta
+        ai_message = response.choices[0].message.content
 
-            # Concatena output (Replicate retorna generator)
-            ai_message = "".join(output)
-
-        except Exception as e:
-            print(f"❌ Erro ao chamar Claude via Replicate: {e}")
-            ai_message = f"Encontrei {len(sorted_bookmarks)} bookmarks relevantes para sua busca. Veja os resultados abaixo."
-    else:
-        # Fallback se não tiver Replicate configurado
-        ai_message = f"Encontrei {len(sorted_bookmarks)} bookmarks relevantes. Aqui estão os top {min(5, len(sorted_bookmarks))} mais similares à sua busca."
+    except Exception as e:
+        print(f"❌ Erro ao chamar OpenAI: {e}")
+        ai_message = f"Encontrei {len(sorted_bookmarks)} bookmarks relevantes para sua busca. Veja os resultados abaixo."
 
     # 6. Retorna resposta
     return {
