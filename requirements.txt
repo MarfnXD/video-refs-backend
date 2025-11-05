@@ -6,6 +6,7 @@ redis
 httpx
 pydantic
 replicate
+openai
 python-multipart
 supabase
 yt-dlp
