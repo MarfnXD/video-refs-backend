@@ -55,10 +55,58 @@ class ApifyService:
             raise ValueError("Nenhum APIFY_TOKEN configurado")
 
         client = self.clients[self._current_client_index]
-        self._current_client_index = (self._current_client_index + 1) % len(self.clients)
-
+        # Print ANTES de incrementar para mostrar o índice correto
         print(f"🔄 Usando Apify token #{self._current_client_index + 1}/{len(self.clients)}")
+
+        self._current_client_index = (self._current_client_index + 1) % len(self.clients)
         return client
+
+    async def _try_all_clients(self, operation_func, operation_name: str = "operação"):
+        """
+        Tenta executar uma operação com todos os clientes Apify até conseguir.
+        Se um token atingir o limite mensal, tenta automaticamente o próximo.
+
+        Args:
+            operation_func: Função async que recebe ApifyClient e retorna o resultado
+            operation_name: Nome da operação para logs
+
+        Returns:
+            Resultado da operação bem-sucedida
+
+        Raises:
+            ValueError: Se TODOS os tokens falharem
+        """
+        if not self.clients:
+            raise ValueError("Nenhum APIFY_TOKEN configurado")
+
+        last_error = None
+        attempts = len(self.clients)  # Tenta todos os tokens disponíveis
+
+        for attempt in range(attempts):
+            try:
+                client = self._get_next_client()
+                print(f"🔄 Tentativa {attempt + 1}/{attempts} para {operation_name}")
+
+                result = await operation_func(client)
+                print(f"✅ {operation_name} bem-sucedida com token #{self._current_client_index}/{len(self.clients)}")
+                return result
+
+            except Exception as e:
+                error_msg = str(e).lower()
+
+                # Detecta erro de limite mensal
+                if "monthly usage" in error_msg or "hard limit" in error_msg or "limit exceeded" in error_msg:
+                    print(f"⚠️ Token #{self._current_client_index}/{len(self.clients)} atingiu limite mensal - tentando próximo token...")
+                    last_error = e
+                    continue
+
+                # Outros erros (não relacionados a limite) - falha imediatamente
+                print(f"❌ Erro inesperado em {operation_name}: {str(e)}")
+                raise
+
+        # Se chegou aqui, TODOS os tokens falharam
+        print(f"❌ TODOS os {attempts} tokens Apify atingiram limite mensal!")
+        raise ValueError(f"Todos os tokens Apify esgotados. Último erro: {str(last_error)}")
 
     async def get_redis_client(self):
         if not self.redis_client:
@@ -197,18 +245,18 @@ class ApifyService:
                 "maxItems": 1
             }
 
-            # Usa rotação de clientes Apify
-            client = self._get_next_client()
-            run = client.actor("apify/tiktok-scraper").call(run_input=run_input)
+            # Função para executar scraping TikTok com um cliente específico
+            async def run_tiktok_scraper(client: ApifyClient):
+                run = client.actor("apify/tiktok-scraper").call(run_input=run_input)
+                items = []
+                for item in client.dataset(run["defaultDatasetId"]).iterate_items():
+                    items.append(item)
+                if not items:
+                    raise ValueError("Vídeo do TikTok não encontrado")
+                return items[0]
 
-            items = []
-            for item in client.dataset(run["defaultDatasetId"]).iterate_items():
-                items.append(item)
-
-            if not items:
-                raise ValueError("Vídeo do TikTok não encontrado")
-
-            data = items[0]
+            # Tenta com todos os tokens disponíveis até conseguir
+            data = await self._try_all_clients(run_tiktok_scraper, "extract_tiktok")
 
             # Extrair comentários se disponíveis (aumentado para 200)
             top_comments = []
@@ -274,24 +322,22 @@ class ApifyService:
                 "addParentData": False  # Reduz dados para evitar timeouts
             }
 
-            # Timeout aumentado - Instagram pode demorar para fazer scraping
-            # Usa rotação de clientes Apify
-            client = self._get_next_client()
-            run = client.actor("apify/instagram-scraper").call(
-                run_input=run_input,
-                timeout_secs=120  # 2 minutos max
-            )
+            # Função para executar scraping Instagram com um cliente específico
+            async def run_instagram_scraper(client: ApifyClient):
+                run = client.actor("apify/instagram-scraper").call(
+                    run_input=run_input,
+                    timeout_secs=120  # 2 minutos max
+                )
+                items = []
+                for item in client.dataset(run["defaultDatasetId"]).iterate_items():
+                    items.append(item)
+                    break  # Apenas 1 item
+                if not items:
+                    raise ValueError("Instagram scraper retornou vazio")
+                return items[0]
 
-            items = []
-            for item in client.dataset(run["defaultDatasetId"]).iterate_items():
-                items.append(item)
-                break  # Apenas 1 item
-
-            if not items:
-                print("⚠️ Instagram scraper retornou vazio - usando fallback")
-                return await self._instagram_fallback(url)
-
-            data = items[0]
+            # Tenta com todos os tokens disponíveis até conseguir
+            data = await self._try_all_clients(run_instagram_scraper, "extract_instagram_reel")
 
             # Validação de dados essenciais
             if not data.get("caption") and not data.get("ownerUsername"):
@@ -414,18 +460,18 @@ class ApifyService:
                 "maxItems": 1
             }
 
-            # Usa rotação de clientes Apify
-            client = self._get_next_client()
-            run = client.actor("apify/tiktok-scraper").call(run_input=run_input)
+            # Função para executar scraping TikTok com um cliente específico
+            async def run_tiktok_downloader(client: ApifyClient):
+                run = client.actor("apify/tiktok-scraper").call(run_input=run_input)
+                items = []
+                for item in client.dataset(run["defaultDatasetId"]).iterate_items():
+                    items.append(item)
+                if not items:
+                    raise ValueError("Vídeo do TikTok não encontrado")
+                return items[0]
 
-            items = []
-            for item in client.dataset(run["defaultDatasetId"]).iterate_items():
-                items.append(item)
-
-            if not items:
-                raise ValueError("Vídeo do TikTok não encontrado")
-
-            data = items[0]
+            # Tenta com todos os tokens disponíveis até conseguir
+            data = await self._try_all_clients(run_tiktok_downloader, "extract_video_download_url_tiktok")
 
             # TikTok retorna videoUrl no campo "video"
             video_url = None
@@ -481,30 +527,29 @@ class ApifyService:
                 "addParentData": False
             }
 
-            # Usa rotação de clientes Apify
-            client = self._get_next_client()
-            run = client.actor("apify/instagram-scraper").call(
-                run_input=run_input,
-                timeout_secs=120  # 2 minutos max
-            )
+            # Função para executar scraping Instagram com um cliente específico
+            async def run_instagram_downloader(client: ApifyClient):
+                run = client.actor("apify/instagram-scraper").call(
+                    run_input=run_input,
+                    timeout_secs=120  # 2 minutos max
+                )
+                items = []
+                for item in client.dataset(run["defaultDatasetId"]).iterate_items():
+                    items.append(item)
+                    break
+                if not items:
+                    raise ValueError("Instagram scraper retornou vazio")
+                data = items[0]
+                # Valida se tem videoUrl
+                if not data.get("videoUrl"):
+                    raise ValueError("Instagram scraper não retornou videoUrl")
+                return data
 
-            items = []
-            for item in client.dataset(run["defaultDatasetId"]).iterate_items():
-                items.append(item)
-                break
-
-            if not items:
-                print("⚠️ Apify Instagram vazio - tentando yt-dlp")
-                return await self._extract_instagram_ytdlp(url, quality)
-
-            data = items[0]
+            # Tenta com todos os tokens disponíveis até conseguir
+            data = await self._try_all_clients(run_instagram_downloader, "extract_video_download_url_instagram")
 
             # Instagram retorna videoUrl no campo "videoUrl"
             video_url = data.get("videoUrl")
-
-            if not video_url:
-                print("⚠️ Apify não retornou videoUrl - tentando yt-dlp")
-                return await self._extract_instagram_ytdlp(url, quality)
 
             # Tamanho estimado
             file_size_mb = None
