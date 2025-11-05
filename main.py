@@ -366,19 +366,20 @@ async def process_metadata_auto(request: ProcessMetadataAutoRequest):
             # Baixa temporariamente da cloud
             logger.info(f"☁️ Baixando vídeo temporariamente da cloud: {request.cloud_video_url[:80]}...")
             try:
-                import requests
+                import httpx
                 import tempfile
 
-                response = requests.get(request.cloud_video_url, stream=True, timeout=60)
-                response.raise_for_status()
+                async with httpx.AsyncClient(timeout=180.0) as client:
+                    response = await client.get(request.cloud_video_url)
+                    response.raise_for_status()
+                    video_data = response.content
 
                 temp_video_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-                for chunk in response.iter_content(chunk_size=8192):
-                    temp_video_file.write(chunk)
+                temp_video_file.write(video_data)
                 temp_video_file.close()
 
                 video_path_for_analysis = temp_video_file.name
-                size_mb = os.path.getsize(video_path_for_analysis) / (1024 * 1024)
+                size_mb = len(video_data) / (1024 * 1024)
                 logger.info(f"✅ Vídeo baixado temporariamente: {size_mb:.2f} MB")
             except Exception as e:
                 logger.error(f"❌ Erro ao baixar vídeo da cloud: {str(e)}")
