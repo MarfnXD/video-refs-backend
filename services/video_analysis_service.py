@@ -1,6 +1,7 @@
 """
 Serviço para análise de conteúdo de vídeo (áudio + visual)
 Usa Whisper API para transcrição e GPT-4 Vision para análise visual
+Inclui tradução automática para português
 """
 import os
 import subprocess
@@ -9,6 +10,7 @@ import logging
 from typing import Optional, Dict, List
 from openai import OpenAI
 from pathlib import Path
+from services.translation_service import translate_multimodal_analysis
 
 logger = logging.getLogger(__name__)
 
@@ -52,13 +54,30 @@ class VideoAnalysisService:
             # 2. Analisar frames visualmente
             visual_analysis = await self._analyze_frames(video_path)
 
+            # 3. Traduzir automaticamente para português (se necessário)
+            transcript = transcript_data.get("text", "") if transcript_data else ""
+            language = transcript_data.get("language", "") if transcript_data else ""
+
+            translations = translate_multimodal_analysis(
+                video_transcript=transcript,
+                visual_analysis=visual_analysis or "",
+                transcript_language=language
+            )
+
             result = {
-                "transcript": transcript_data.get("text", "") if transcript_data else "",
-                "language": transcript_data.get("language", "") if transcript_data else "",
-                "visual_analysis": visual_analysis or ""
+                "transcript": transcript,
+                "language": language,
+                "visual_analysis": visual_analysis or "",
+                # Campos traduzidos (None se já estava em PT)
+                "transcript_pt": translations.get("video_transcript_pt"),
+                "visual_analysis_pt": translations.get("visual_analysis_pt")
             }
 
             logger.info(f"✅ Análise concluída - Transcript: {len(result['transcript'])} chars, Visual: {len(result['visual_analysis'])} chars")
+            if result['transcript_pt']:
+                logger.info(f"🌐 Tradução PT - Transcript: {len(result['transcript_pt'])} chars")
+            if result['visual_analysis_pt']:
+                logger.info(f"🌐 Tradução PT - Visual: {len(result['visual_analysis_pt'])} chars")
             return result
 
         except Exception as e:

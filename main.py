@@ -90,6 +90,8 @@ class ProcessMetadataAutoResponse(BaseModel):
     video_transcript: Optional[str] = None  # Transcrição do áudio (Whisper)
     visual_analysis: Optional[str] = None   # Análise visual (GPT-4 Vision)
     transcript_language: Optional[str] = None  # Idioma detectado
+    video_transcript_pt: Optional[str] = None  # Tradução PT da transcrição
+    visual_analysis_pt: Optional[str] = None  # Tradução PT da análise visual
     error: Optional[str] = None
 
 
@@ -349,6 +351,8 @@ async def process_metadata_auto(request: ProcessMetadataAutoRequest):
         video_transcript = ""
         visual_analysis = ""
         transcript_language = ""
+        video_transcript_pt = None
+        visual_analysis_pt = None
 
         if request.local_video_path and video_analysis_service.is_available():
             logger.info(f"🎬 Analisando vídeo: {request.local_video_path}")
@@ -358,7 +362,13 @@ async def process_metadata_auto(request: ProcessMetadataAutoRequest):
                 video_transcript = video_analysis.get("transcript", "")
                 visual_analysis = video_analysis.get("visual_analysis", "")
                 transcript_language = video_analysis.get("language", "")
+                video_transcript_pt = video_analysis.get("transcript_pt")
+                visual_analysis_pt = video_analysis.get("visual_analysis_pt")
                 logger.info(f"✅ Análise de vídeo concluída - Transcript: {len(video_transcript)} chars, Visual: {len(visual_analysis)} chars")
+                if video_transcript_pt:
+                    logger.info(f"🌐 Tradução PT (Transcrição): {len(video_transcript_pt)} chars")
+                if visual_analysis_pt:
+                    logger.info(f"🌐 Tradução PT (Visual): {len(visual_analysis_pt)} chars")
             else:
                 logger.warning("⚠️ Análise de vídeo falhou, continuando sem transcrição/visual")
 
@@ -390,7 +400,9 @@ async def process_metadata_auto(request: ProcessMetadataAutoRequest):
             relevance_score=result.get("relevance_score", 0.5),
             video_transcript=video_transcript if video_transcript else None,
             visual_analysis=visual_analysis if visual_analysis else None,
-            transcript_language=transcript_language if transcript_language else None
+            transcript_language=transcript_language if transcript_language else None,
+            video_transcript_pt=video_transcript_pt,
+            visual_analysis_pt=visual_analysis_pt
         )
 
     except Exception as e:
@@ -911,6 +923,8 @@ async def process_video_to_supabase(request: ProcessToSupabaseRequest):
         video_transcript = None
         visual_analysis = None
         transcript_language = None
+        video_transcript_pt = None
+        visual_analysis_pt = None
 
         if video_analysis_service.is_available():
             try:
@@ -921,10 +935,16 @@ async def process_video_to_supabase(request: ProcessToSupabaseRequest):
                     video_transcript = video_analysis.get("transcript", "")
                     visual_analysis = video_analysis.get("visual_analysis", "")
                     transcript_language = video_analysis.get("language", "")
+                    video_transcript_pt = video_analysis.get("transcript_pt")
+                    visual_analysis_pt = video_analysis.get("visual_analysis_pt")
 
                     logger.info(f"✅ Análise multimodal concluída!")
                     logger.info(f"   - Transcrição: {len(video_transcript)} chars ({transcript_language})")
                     logger.info(f"   - Análise Visual: {len(visual_analysis)} chars")
+                    if video_transcript_pt:
+                        logger.info(f"   - Tradução PT (Transcrição): {len(video_transcript_pt)} chars")
+                    if visual_analysis_pt:
+                        logger.info(f"   - Tradução PT (Visual): {len(visual_analysis_pt)} chars")
             except Exception as analysis_error:
                 # Não crítico - continua mesmo se análise falhar
                 logger.warning(f"⚠️  Análise multimodal falhou (não crítico): {str(analysis_error)}")
@@ -971,6 +991,10 @@ async def process_video_to_supabase(request: ProcessToSupabaseRequest):
             update_data['visual_analysis'] = visual_analysis
         if transcript_language:
             update_data['transcript_language'] = transcript_language
+        if video_transcript_pt:
+            update_data['video_transcript_pt'] = video_transcript_pt
+        if visual_analysis_pt:
+            update_data['visual_analysis_pt'] = visual_analysis_pt
         if video_transcript or visual_analysis:
             update_data['analyzed_at'] = datetime.utcnow().isoformat()
 
