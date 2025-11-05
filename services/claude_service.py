@@ -344,25 +344,29 @@ ANALISE OS METADADOS ABAIXO E EXTRAIA INFORMAÇÕES RELEVANTES:
 (Se fornecido, este é o motivo pelo qual o usuário salvou o vídeo - DEVE ter PESO MÁXIMO na análise!
 O auto_description DEVE refletir este contexto se disponível.)
 
-📌 TÍTULO (peso 25%): "{title}"
+🖼️ ANÁLISE VISUAL (peso 35% - 🎯 FONTE MAIS CONFIÁVEL):
+{visual_analysis if visual_analysis else 'Não disponível'}
+(Análise automática de frames do vídeo via GPT-4 Vision - detecta CGI, VFX, FOOH, elementos visuais reais)
+⚠️ CRÍTICO: Se a análise visual contradiz outros dados (comentários, título), SEMPRE priorize a análise visual!
+Ela descreve o que REALMENTE está sendo mostrado no vídeo, não interpretações pessoais.
 
-📄 DESCRIÇÃO (peso 20%):
+🎤 TRANSCRIÇÃO DE ÁUDIO (peso 25%):
+{video_transcript if video_transcript else 'Não disponível'}
+(Transcrição automática do áudio do vídeo via Whisper AI - revela narrações, diálogos, técnicas mencionadas)
+
+📌 TÍTULO (peso 12%): "{title}"
+
+📄 DESCRIÇÃO (peso 10%):
 "{description or 'Não disponível'}"
 
-#️⃣ HASHTAGS (peso 15%):
+#️⃣ HASHTAGS (peso 8%):
 {hashtags_str}
 
-💬 COMENTÁRIOS TOP FILTRADOS (peso 10%):
+💬 COMENTÁRIOS TOP FILTRADOS (peso 5% - ⚠️ MENOR PRIORIDADE):
 {comments_str}
-(Comentários genéricos já foram filtrados automaticamente. Estes são os mais relevantes ordenados por likes.)
-
-🎤 TRANSCRIÇÃO DE ÁUDIO (peso 20%):
-{video_transcript if video_transcript else 'Não disponível'}
-(Transcrição automática do áudio do vídeo via Whisper AI)
-
-🖼️ ANÁLISE VISUAL (peso 15%):
-{visual_analysis if visual_analysis else 'Não disponível'}
-(Análise automática de frames do vídeo via GPT-4 Vision - detecta CGI, VFX, FOOH, etc)
+(Comentários genéricos já foram filtrados. ATENÇÃO: Comentários são interpretações PESSOAIS de usuários,
+podem estar completamente errados sobre o conteúdo real do vídeo. Use apenas como contexto secundário.
+Se comentários contradizem análise visual/transcrição, IGNORE os comentários!)
 
 INSTRUÇÕES DE ANÁLISE:
 1. **⭐ PRIORIZE O CONTEXTO DO USUÁRIO ACIMA DE TUDO** (SE FORNECIDO):
@@ -375,16 +379,18 @@ INSTRUÇÕES DE ANÁLISE:
    - Se o título NÃO se relaciona com a descrição, reduza o peso do título
    - Se título for genérico tipo "😱", "TRENDING", priorize descrição/hashtags
 
-3. **Análise de Comentários**:
-   - Os comentários JÁ FORAM FILTRADOS (removidos genéricos como "top", "🔥", etc)
-   - Dê MAIS PESO aos comentários - eles revelam como pessoas descrevem o vídeo
-   - Comentários podem conter termos técnicos: "CGI", "VFX", "3D", "fake", etc
+3. **⚠️ ANÁLISE VISUAL TEM PRIORIDADE ABSOLUTA SOBRE COMENTÁRIOS** (CRÍTICO):
+   - A análise visual descreve o que REALMENTE está no vídeo (CGI, objetos, cenários, técnicas)
+   - Comentários são interpretações PESSOAIS de usuários (podem estar completamente errados!)
+   - REGRA DE OURO: Se análise visual diz "cena celestial com CGI" mas comentários dizem "religião",
+     você DEVE basear tags/categorias na análise visual, NÃO nos comentários
+   - Comentários SÓ devem ser usados se NÃO contradizem análise visual/transcrição
 
-4. **Priorize TRANSCRIÇÃO e ANÁLISE VISUAL** (MUITO IMPORTANTE):
-   - Se disponíveis, transcrição e análise visual são AS FONTES MAIS CONFIÁVEIS
-   - Transcrição: revela o que é DITO no vídeo (narrações sobre técnicas, produtos, etc)
-   - Análise Visual: detecta o que é MOSTRADO (CGI, FOOH, VFX, objetos 3D, etc)
-   - Se análise visual mencionar "CGI", "FOOH", "3D objects" → PRIORIZE isso
+4. **Priorize ANÁLISE VISUAL e TRANSCRIÇÃO** (MUITO IMPORTANTE):
+   - Análise Visual (35%): detecta o que é MOSTRADO (CGI, FOOH, VFX, objetos 3D, cenários reais)
+   - Transcrição (25%): revela o que é DITO (narrações sobre técnicas, produtos, conceitos)
+   - Estes são dados OBJETIVOS, não interpretações
+   - Se análise visual mencionar "CGI", "FOOH", "3D objects", "cosmic scene" → PRIORIZE isso acima de tudo!
 
 5. **Extração Inteligente**:
    - Identifique o TEMA PRINCIPAL do vídeo
@@ -392,12 +398,15 @@ INSTRUÇÕES DE ANÁLISE:
    - Identifique FERRAMENTAS/SOFTWARE citados
    - Detecte CATEGORIA principal (tutorial, inspiração, case, técnica, etc)
 
-6. **Hierarquia de Relevância**:
-   - Contexto do usuário fornecido = ALTÍSSIMA confiança (peso máximo!)
-   - Transcrição + Análise Visual = alta confiança
-   - Título + Descrição coerentes = alta confiança
-   - Só descrição boa = média confiança
-   - Só hashtags/comentários = baixa confiança
+6. **Hierarquia de Relevância (ORDEM DE PRIORIDADE)**:
+   1️⃣ Contexto do usuário fornecido = ALTÍSSIMA confiança (40% - peso máximo!)
+   2️⃣ Análise Visual = ALTA confiança (35% - descreve o que está REALMENTE no vídeo)
+   3️⃣ Transcrição = alta confiança (25% - revela o que é dito/cantado)
+   4️⃣ Título + Descrição coerentes = média confiança (12% + 10%)
+   5️⃣ Hashtags = baixa confiança (8%)
+   6️⃣ Comentários = BAIXÍSSIMA confiança (5% - interpretações pessoais, podem estar errados)
+
+   ⚠️ SE HOUVER CONTRADIÇÃO: Análise Visual > Transcrição > Título/Descrição > Hashtags > Comentários
 
 7. **Detecção de FOOH (Fake Out-Of-Home / CGI Advertising)**:
    ⚠️ ATENÇÃO: FOOHs são MUITO IMPORTANTES de detectar corretamente!
