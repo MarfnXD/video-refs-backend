@@ -163,7 +163,9 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
         title: str,
         description: str = "",
         hashtags: List[str] = None,
-        top_comments: List[Dict] = None
+        top_comments: List[Dict] = None,
+        video_transcript: str = "",
+        visual_analysis: str = ""
     ) -> Optional[Dict]:
         """
         Processa metadados do vídeo automaticamente (sem contexto do usuário)
@@ -173,6 +175,8 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
             description: Descrição do vídeo
             hashtags: Lista de hashtags
             top_comments: Lista de comentários top [{text, likes, author}]
+            video_transcript: Transcrição do áudio (Whisper API)
+            visual_analysis: Análise visual dos frames (GPT-4 Vision)
 
         Returns:
             Dict com auto_description, auto_tags, auto_categories
@@ -188,8 +192,11 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
             hashtags_str = ", ".join(hashtags) if hashtags else "Nenhuma"
             comments_str = self._format_comments(top_comments) if top_comments else "Nenhum"
 
-            # Montar prompt
-            prompt = self._build_auto_prompt(title, description, hashtags_str, comments_str)
+            # Montar prompt (com transcrição e análise visual)
+            prompt = self._build_auto_prompt(
+                title, description, hashtags_str, comments_str,
+                video_transcript, visual_analysis
+            )
 
             # Chamar Claude via Replicate
             output = self.client.run(
@@ -297,7 +304,9 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
         title: str,
         description: str,
         hashtags_str: str,
-        comments_str: str
+        comments_str: str,
+        video_transcript: str = "",
+        visual_analysis: str = ""
     ) -> str:
         """Constrói o prompt para processamento automático de metadados"""
         return f"""Você é um assistente especializado em analisar vídeos de referência criativa.
@@ -312,9 +321,17 @@ ANALISE OS METADADOS ABAIXO E EXTRAIA INFORMAÇÕES RELEVANTES:
 #️⃣ HASHTAGS (peso 20%):
 {hashtags_str}
 
-💬 COMENTÁRIOS TOP FILTRADOS (peso 15%):
+💬 COMENTÁRIOS TOP FILTRADOS (peso 10%):
 {comments_str}
 (Comentários genéricos já foram filtrados automaticamente. Estes são os mais relevantes ordenados por likes.)
+
+🎤 TRANSCRIÇÃO DE ÁUDIO (peso 20%):
+{video_transcript if video_transcript else 'Não disponível'}
+(Transcrição automática do áudio do vídeo via Whisper AI)
+
+🖼️ ANÁLISE VISUAL (peso 15%):
+{visual_analysis if visual_analysis else 'Não disponível'}
+(Análise automática de frames do vídeo via GPT-4 Vision - detecta CGI, VFX, FOOH, etc)
 
 INSTRUÇÕES DE ANÁLISE:
 1. **Validação de Consistência**:
@@ -326,7 +343,13 @@ INSTRUÇÕES DE ANÁLISE:
    - Dê MAIS PESO aos comentários - eles revelam como pessoas descrevem o vídeo
    - Comentários podem conter termos técnicos: "CGI", "VFX", "3D", "fake", etc
 
-3. **Extração Inteligente**:
+3. **Priorize TRANSCRIÇÃO e ANÁLISE VISUAL** (MUITO IMPORTANTE):
+   - Se disponíveis, transcrição e análise visual são AS FONTES MAIS CONFIÁVEIS
+   - Transcrição: revela o que é DITO no vídeo (narrações sobre técnicas, produtos, etc)
+   - Análise Visual: detecta o que é MOSTRADO (CGI, FOOH, VFX, objetos 3D, etc)
+   - Se análise visual mencionar "CGI", "FOOH", "3D objects" → PRIORIZE isso
+
+4. **Extração Inteligente**:
    - Identifique o TEMA PRINCIPAL do vídeo
    - Extraia TÉCNICAS mencionadas (edição, efeitos, transições, etc)
    - Identifique FERRAMENTAS/SOFTWARE citados
