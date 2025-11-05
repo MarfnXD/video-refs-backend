@@ -279,6 +279,26 @@ INSTRUÇÕES DE ANÁLISE:
    - Só descrição boa = média confiança
    - Só hashtags/comentários = baixa confiança
 
+5. **Detecção de FOOH (Fake Out-Of-Home / CGI Advertising)**:
+   ⚠️ ATENÇÃO: FOOHs são MUITO IMPORTANTES de detectar corretamente!
+
+   O QUE É FOOH:
+   - Vídeos de publicidade usando objetos 3D/CGI em ambientes reais externos
+   - "Fake" outdoor advertising (outdoor falso gerado por computador)
+   - Augmented reality advertising (AR) em espaços públicos
+   - Exemplos: objetos gigantes 3D "saindo" de telas outdoor, produtos flutuando em praças
+
+   COMO DETECTAR FOOH:
+   - Busque palavras-chave: "FOOH", "CGI", "3D", "fake", "augmented", "AR", "VFX", "visual effects", "outdoor", "billboard", "OOH"
+   - Contextos típicos: lançamento de produtos, eventos globais (Olimpíadas, Copa do Mundo), campanhas de marca
+   - Características visuais: objetos irreais/impossíveis em cenários urbanos externos
+   - Hashtags comuns: #FOOH, #CGI, #3D, #OutdoorAdvertising, #FakeOOH
+
+   SE DETECTAR FOOH:
+   - SEMPRE inclua "FOOH / CGI Advertising" nas categorias
+   - Adicione tags relacionadas: "fooh", "cgi", "3d", "outdoor-advertising", "vfx"
+   - Na auto_description, mencione explicitamente que é um FOOH
+
 CATEGORIAS PADRÕES (sugira 1-3 mais relevantes):
 - Técnica de Edição
 - Referência Visual
@@ -289,6 +309,7 @@ CATEGORIAS PADRÕES (sugira 1-3 mais relevantes):
 - Storytelling
 - Tutorial
 - Case de Sucesso
+- FOOH / CGI Advertising
 - Outro
 
 RETORNE APENAS JSON (sem markdown, sem explicações):
