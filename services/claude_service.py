@@ -165,10 +165,11 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
         hashtags: List[str] = None,
         top_comments: List[Dict] = None,
         video_transcript: str = "",
-        visual_analysis: str = ""
+        visual_analysis: str = "",
+        user_context: str = ""
     ) -> Optional[Dict]:
         """
-        Processa metadados do vídeo automaticamente (sem contexto do usuário)
+        Processa metadados do vídeo automaticamente (com ou sem contexto do usuário)
 
         Args:
             title: Título do vídeo
@@ -177,6 +178,7 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
             top_comments: Lista de comentários top [{text, likes, author}]
             video_transcript: Transcrição do áudio (Whisper API)
             visual_analysis: Análise visual dos frames (GPT-4 Vision)
+            user_context: Contexto manual do usuário (opcional - peso máximo se fornecido)
 
         Returns:
             Dict com auto_description, auto_tags, auto_categories
@@ -190,12 +192,19 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
 
             # Preparar dados
             hashtags_str = ", ".join(hashtags) if hashtags else "Nenhuma"
-            comments_str = self._format_comments(top_comments) if top_comments else "Nenhum"
 
-            # Montar prompt (com transcrição e análise visual)
+            # Filtrar e formatar comentários (guardamos os filtrados para retornar)
+            filtered_comments_list = []
+            if top_comments:
+                filtered_comments_list = self._filter_and_prioritize_comments(top_comments, max_count=50)
+                comments_str = self._format_filtered_comments(filtered_comments_list)
+            else:
+                comments_str = "Nenhum"
+
+            # Montar prompt (com transcrição, análise visual e contexto do usuário)
             prompt = self._build_auto_prompt(
                 title, description, hashtags_str, comments_str,
-                video_transcript, visual_analysis
+                video_transcript, visual_analysis, user_context
             )
 
             # Chamar Claude via Replicate
@@ -219,7 +228,10 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
             # Parse JSON
             result = json.loads(response_text)
 
-            logger.info(f"✅ Processamento automático concluído: {len(result.get('auto_tags', []))} tags")
+            # Adicionar comentários filtrados ao resultado
+            result['filtered_comments'] = filtered_comments_list
+
+            logger.info(f"✅ Processamento automático concluído: {len(result.get('auto_tags', []))} tags, {len(filtered_comments_list)} comentários filtrados")
             return result
 
         except json.JSONDecodeError as e:
@@ -280,6 +292,19 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
         # Retornar os top N
         return sorted_comments[:max_count]
 
+    def _format_filtered_comments(self, filtered_comments: List[Dict]) -> str:
+        """Formata comentários já filtrados para o prompt"""
+        if not filtered_comments:
+            return "Nenhum comentário relevante"
+
+        formatted = []
+        for i, comment in enumerate(filtered_comments, 1):
+            text = comment.get('text', '')
+            likes = comment.get('likes', 0)
+            formatted.append(f"  {i}. \"{text}\" ({likes} likes)")
+
+        return "\n".join(formatted)
+
     def _format_comments(self, comments: List[Dict]) -> str:
         """Formata comentários para o prompt (com filtro inteligente)"""
         if not comments:
@@ -306,19 +331,25 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
         hashtags_str: str,
         comments_str: str,
         video_transcript: str = "",
-        visual_analysis: str = ""
+        visual_analysis: str = "",
+        user_context: str = ""
     ) -> str:
         """Constrói o prompt para processamento automático de metadados"""
         return f"""Você é um assistente especializado em analisar vídeos de referência criativa.
 
 ANALISE OS METADADOS ABAIXO E EXTRAIA INFORMAÇÕES RELEVANTES:
 
-📌 TÍTULO (peso 35%): "{title}"
+👤 CONTEXTO MANUAL DO USUÁRIO (peso 40% - ⭐ PRIORIDADE MÁXIMA):
+{user_context if user_context else 'Não fornecido'}
+(Se fornecido, este é o motivo pelo qual o usuário salvou o vídeo - DEVE ter PESO MÁXIMO na análise!
+O auto_description DEVE refletir este contexto se disponível.)
 
-📄 DESCRIÇÃO (peso 30%):
+📌 TÍTULO (peso 25%): "{title}"
+
+📄 DESCRIÇÃO (peso 20%):
 "{description or 'Não disponível'}"
 
-#️⃣ HASHTAGS (peso 20%):
+#️⃣ HASHTAGS (peso 15%):
 {hashtags_str}
 
 💬 COMENTÁRIOS TOP FILTRADOS (peso 10%):
@@ -334,33 +365,41 @@ ANALISE OS METADADOS ABAIXO E EXTRAIA INFORMAÇÕES RELEVANTES:
 (Análise automática de frames do vídeo via GPT-4 Vision - detecta CGI, VFX, FOOH, etc)
 
 INSTRUÇÕES DE ANÁLISE:
-1. **Validação de Consistência**:
+1. **⭐ PRIORIZE O CONTEXTO DO USUÁRIO ACIMA DE TUDO** (SE FORNECIDO):
+   - O contexto do usuário é o motivo REAL pelo qual ele salvou este vídeo
+   - Se fornecido, o auto_description DEVE começar refletindo este contexto
+   - Exemplo: Contexto="ref de transições suaves" → auto_description="Vídeo demonstrando técnicas de transições suaves..."
+   - Tags e categorias devem ser extraídas considerando PRINCIPALMENTE o contexto do usuário
+
+2. **Validação de Consistência**:
    - Se o título NÃO se relaciona com a descrição, reduza o peso do título
    - Se título for genérico tipo "😱", "TRENDING", priorize descrição/hashtags
 
-2. **Análise de Comentários**:
+3. **Análise de Comentários**:
    - Os comentários JÁ FORAM FILTRADOS (removidos genéricos como "top", "🔥", etc)
    - Dê MAIS PESO aos comentários - eles revelam como pessoas descrevem o vídeo
    - Comentários podem conter termos técnicos: "CGI", "VFX", "3D", "fake", etc
 
-3. **Priorize TRANSCRIÇÃO e ANÁLISE VISUAL** (MUITO IMPORTANTE):
+4. **Priorize TRANSCRIÇÃO e ANÁLISE VISUAL** (MUITO IMPORTANTE):
    - Se disponíveis, transcrição e análise visual são AS FONTES MAIS CONFIÁVEIS
    - Transcrição: revela o que é DITO no vídeo (narrações sobre técnicas, produtos, etc)
    - Análise Visual: detecta o que é MOSTRADO (CGI, FOOH, VFX, objetos 3D, etc)
    - Se análise visual mencionar "CGI", "FOOH", "3D objects" → PRIORIZE isso
 
-4. **Extração Inteligente**:
+5. **Extração Inteligente**:
    - Identifique o TEMA PRINCIPAL do vídeo
    - Extraia TÉCNICAS mencionadas (edição, efeitos, transições, etc)
    - Identifique FERRAMENTAS/SOFTWARE citados
    - Detecte CATEGORIA principal (tutorial, inspiração, case, técnica, etc)
 
-4. **Hierarquia de Relevância**:
+6. **Hierarquia de Relevância**:
+   - Contexto do usuário fornecido = ALTÍSSIMA confiança (peso máximo!)
+   - Transcrição + Análise Visual = alta confiança
    - Título + Descrição coerentes = alta confiança
    - Só descrição boa = média confiança
    - Só hashtags/comentários = baixa confiança
 
-5. **Detecção de FOOH (Fake Out-Of-Home / CGI Advertising)**:
+7. **Detecção de FOOH (Fake Out-Of-Home / CGI Advertising)**:
    ⚠️ ATENÇÃO: FOOHs são MUITO IMPORTANTES de detectar corretamente!
 
    O QUE É FOOH:
