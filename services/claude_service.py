@@ -223,13 +223,69 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
             logger.error(f"❌ Erro ao processar metadados automaticamente: {str(e)}")
             return None
 
+    def _is_generic_comment(self, text: str) -> bool:
+        """Detecta comentários genéricos/irrelevantes"""
+        if not text or len(text.strip()) < 3:
+            return True
+
+        text_lower = text.lower().strip()
+
+        # Lista de padrões genéricos (português + inglês + espanhol)
+        generic_patterns = [
+            # Português
+            "top", "kkk", "kkkk", "primeiro", "segunda", "primeirão",
+            "like", "mt bom", "demais", "foda", "incrivel", "show",
+            # Inglês
+            "first", "second", "nice", "cool", "wow", "great", "amazing",
+            "love it", "love this", "awesome", "fire", "lit",
+            # Espanhol
+            "primero", "que bueno", "increible",
+            # Emojis/símbolos comuns
+            "❤", "🔥", "😍", "👏", "💯", "😂", "🤣", "👍",
+        ]
+
+        # Verifica se é APENAS emojis ou APENAS uma palavra genérica
+        for pattern in generic_patterns:
+            if text_lower == pattern or text_lower.replace(" ", "") == pattern.replace(" ", ""):
+                return True
+
+        # Se tem menos de 5 caracteres e contém emojis, provavelmente é genérico
+        if len(text_lower) < 5 and any(char in text for char in "❤🔥😍👏💯😂🤣👍"):
+            return True
+
+        return False
+
+    def _filter_and_prioritize_comments(self, comments: List[Dict], max_count: int = 50) -> List[Dict]:
+        """Filtra comentários genéricos e prioriza por relevância"""
+        if not comments:
+            return []
+
+        # Filtrar comentários genéricos
+        filtered = [c for c in comments if not self._is_generic_comment(c.get('text', ''))]
+
+        # Se filtrou tudo, usa os originais (melhor comentários genéricos que nenhum)
+        if not filtered:
+            filtered = comments
+
+        # Ordenar por likes (comentários com mais likes primeiro)
+        sorted_comments = sorted(filtered, key=lambda x: x.get('likes', 0), reverse=True)
+
+        # Retornar os top N
+        return sorted_comments[:max_count]
+
     def _format_comments(self, comments: List[Dict]) -> str:
-        """Formata comentários para o prompt"""
+        """Formata comentários para o prompt (com filtro inteligente)"""
         if not comments:
             return "Nenhum"
 
+        # Filtrar e priorizar (50 melhores comentários)
+        filtered_comments = self._filter_and_prioritize_comments(comments, max_count=50)
+
+        if not filtered_comments:
+            return "Nenhum comentário relevante"
+
         formatted = []
-        for i, comment in enumerate(comments[:10], 1):  # Máximo 10 comentários
+        for i, comment in enumerate(filtered_comments, 1):
             text = comment.get('text', '')
             likes = comment.get('likes', 0)
             formatted.append(f"  {i}. \"{text}\" ({likes} likes)")
@@ -248,7 +304,7 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
 
 ANALISE OS METADADOS ABAIXO E EXTRAIA INFORMAÇÕES RELEVANTES:
 
-📌 TÍTULO (peso 40%): "{title}"
+📌 TÍTULO (peso 35%): "{title}"
 
 📄 DESCRIÇÃO (peso 30%):
 "{description or 'Não disponível'}"
@@ -256,17 +312,19 @@ ANALISE OS METADADOS ABAIXO E EXTRAIA INFORMAÇÕES RELEVANTES:
 #️⃣ HASHTAGS (peso 20%):
 {hashtags_str}
 
-💬 COMENTÁRIOS TOP (peso 10%):
+💬 COMENTÁRIOS TOP FILTRADOS (peso 15%):
 {comments_str}
+(Comentários genéricos já foram filtrados automaticamente. Estes são os mais relevantes ordenados por likes.)
 
 INSTRUÇÕES DE ANÁLISE:
 1. **Validação de Consistência**:
    - Se o título NÃO se relaciona com a descrição, reduza o peso do título
    - Se título for genérico tipo "😱", "TRENDING", priorize descrição/hashtags
 
-2. **Filtragem de Ruído**:
-   - Ignore comentários genéricos: "top", "🔥", "primeiro", "like", etc
-   - Priorize comentários que DESCREVEM o conteúdo
+2. **Análise de Comentários**:
+   - Os comentários JÁ FORAM FILTRADOS (removidos genéricos como "top", "🔥", etc)
+   - Dê MAIS PESO aos comentários - eles revelam como pessoas descrevem o vídeo
+   - Comentários podem conter termos técnicos: "CGI", "VFX", "3D", "fake", etc
 
 3. **Extração Inteligente**:
    - Identifique o TEMA PRINCIPAL do vídeo

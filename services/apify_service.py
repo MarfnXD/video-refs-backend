@@ -210,10 +210,10 @@ class ApifyService:
 
             data = items[0]
 
-            # Extrair comentários se disponíveis
+            # Extrair comentários se disponíveis (aumentado para 200)
             top_comments = []
             if "comments" in data and data["comments"]:
-                for comment in data["comments"][:50]:
+                for comment in data["comments"][:200]:
                     top_comments.append(Comment(
                         text=comment.get("text", ""),
                         author=comment.get("author", ""),
@@ -298,11 +298,11 @@ class ApifyService:
                 print("⚠️ Instagram scraper retornou dados incompletos - usando fallback")
                 return await self._instagram_fallback(url)
 
-            # Extrair comentários se disponíveis (com proteção)
+            # Extrair comentários se disponíveis (aumentado para 200, com proteção)
             top_comments = []
             try:
                 if "latestComments" in data and data["latestComments"]:
-                    for comment in data["latestComments"][:50]:
+                    for comment in data["latestComments"][:200]:
                         if comment.get("text"):  # Valida que tem texto
                             top_comments.append(Comment(
                                 text=comment.get("text", ""),
