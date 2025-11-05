@@ -17,6 +17,7 @@ from services.claude_service import claude_service
 from services.chat_service import chat_with_ai, find_similar_bookmarks
 from services.transcoding_service import TranscodingService
 from services.thumbnail_service import ThumbnailService
+from services.video_analysis_service import video_analysis_service
 from supabase import create_client, Client
 
 # Configurar logging
@@ -76,6 +77,7 @@ class ProcessMetadataAutoRequest(BaseModel):
     description: Optional[str] = None
     hashtags: Optional[List[str]] = None
     top_comments: Optional[List[dict]] = None
+    local_video_path: Optional[str] = None  # Caminho do vídeo para análise (transcrição + visual)
 
 
 class ProcessMetadataAutoResponse(BaseModel):
@@ -85,6 +87,9 @@ class ProcessMetadataAutoResponse(BaseModel):
     auto_categories: Optional[List[str]] = None
     confidence: Optional[str] = None
     relevance_score: Optional[float] = None
+    video_transcript: Optional[str] = None  # Transcrição do áudio (Whisper)
+    visual_analysis: Optional[str] = None   # Análise visual (GPT-4 Vision)
+    transcript_language: Optional[str] = None  # Idioma detectado
     error: Optional[str] = None
 
 
@@ -319,6 +324,10 @@ async def process_metadata_auto(request: ProcessMetadataAutoRequest):
     - auto_tags: Tags extraídas dos metadados
     - auto_categories: Categorias sugeridas
 
+    Se local_video_path for fornecido, também analisa o vídeo:
+    - Transcrição de áudio (Whisper API)
+    - Análise visual de frames (GPT-4 Vision)
+
     Usado quando usuário pula a captura de contexto.
     """
     try:
@@ -336,13 +345,32 @@ async def process_metadata_auto(request: ProcessMetadataAutoRequest):
                 error="Claude API não configurada"
             )
 
-        # Processar metadados com Claude
+        # Analisar vídeo se caminho foi fornecido
+        video_transcript = ""
+        visual_analysis = ""
+        transcript_language = ""
+
+        if request.local_video_path and video_analysis_service.is_available():
+            logger.info(f"🎬 Analisando vídeo: {request.local_video_path}")
+            video_analysis = await video_analysis_service.analyze_video(request.local_video_path)
+
+            if video_analysis:
+                video_transcript = video_analysis.get("transcript", "")
+                visual_analysis = video_analysis.get("visual_analysis", "")
+                transcript_language = video_analysis.get("language", "")
+                logger.info(f"✅ Análise de vídeo concluída - Transcript: {len(video_transcript)} chars, Visual: {len(visual_analysis)} chars")
+            else:
+                logger.warning("⚠️ Análise de vídeo falhou, continuando sem transcrição/visual")
+
+        # Processar metadados com Claude (com transcript + visual)
         logger.info("🤖 Processando metadados automaticamente...")
         result = await claude_service.process_metadata_auto(
             title=request.title,
             description=request.description or "",
             hashtags=request.hashtags or [],
-            top_comments=request.top_comments or []
+            top_comments=request.top_comments or [],
+            video_transcript=video_transcript,
+            visual_analysis=visual_analysis
         )
 
         if not result:
@@ -359,7 +387,10 @@ async def process_metadata_auto(request: ProcessMetadataAutoRequest):
             auto_tags=result.get("auto_tags", []),
             auto_categories=result.get("auto_categories", []),
             confidence=result.get("confidence", "medium"),
-            relevance_score=result.get("relevance_score", 0.5)
+            relevance_score=result.get("relevance_score", 0.5),
+            video_transcript=video_transcript if video_transcript else None,
+            visual_analysis=visual_analysis if visual_analysis else None,
+            transcript_language=transcript_language if transcript_language else None
         )
 
     except Exception as e:
