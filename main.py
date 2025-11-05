@@ -77,7 +77,9 @@ class ProcessMetadataAutoRequest(BaseModel):
     description: Optional[str] = None
     hashtags: Optional[List[str]] = None
     top_comments: Optional[List[dict]] = None
-    local_video_path: Optional[str] = None  # Caminho do vídeo para análise (transcrição + visual)
+    local_video_path: Optional[str] = None  # Caminho do vídeo local para análise (transcrição + visual)
+    cloud_video_url: Optional[str] = None  # URL do vídeo na cloud (Supabase) - será baixado temporariamente
+    user_context: Optional[str] = None  # Contexto manual do usuário (peso máximo na análise!)
 
 
 class ProcessMetadataAutoResponse(BaseModel):
@@ -92,6 +94,7 @@ class ProcessMetadataAutoResponse(BaseModel):
     transcript_language: Optional[str] = None  # Idioma detectado
     video_transcript_pt: Optional[str] = None  # Tradução PT da transcrição
     visual_analysis_pt: Optional[str] = None  # Tradução PT da análise visual
+    filtered_comments: Optional[List[dict]] = None  # 50 melhores comentários filtrados
     error: Optional[str] = None
 
 
@@ -353,10 +356,37 @@ async def process_metadata_auto(request: ProcessMetadataAutoRequest):
         transcript_language = ""
         video_transcript_pt = None
         visual_analysis_pt = None
+        temp_video_file = None
 
-        if request.local_video_path and video_analysis_service.is_available():
-            logger.info(f"🎬 Analisando vídeo: {request.local_video_path}")
-            video_analysis = await video_analysis_service.analyze_video(request.local_video_path)
+        # Análise multimodal (Whisper + GPT-4 Vision)
+        video_path_for_analysis = None
+        if request.local_video_path:
+            video_path_for_analysis = request.local_video_path
+        elif request.cloud_video_url:
+            # Baixa temporariamente da cloud
+            logger.info(f"☁️ Baixando vídeo temporariamente da cloud: {request.cloud_video_url[:80]}...")
+            try:
+                import requests
+                import tempfile
+
+                response = requests.get(request.cloud_video_url, stream=True, timeout=60)
+                response.raise_for_status()
+
+                temp_video_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+                for chunk in response.iter_content(chunk_size=8192):
+                    temp_video_file.write(chunk)
+                temp_video_file.close()
+
+                video_path_for_analysis = temp_video_file.name
+                size_mb = os.path.getsize(video_path_for_analysis) / (1024 * 1024)
+                logger.info(f"✅ Vídeo baixado temporariamente: {size_mb:.2f} MB")
+            except Exception as e:
+                logger.error(f"❌ Erro ao baixar vídeo da cloud: {str(e)}")
+                video_path_for_analysis = None
+
+        if video_path_for_analysis and video_analysis_service.is_available():
+            logger.info(f"🎬 Analisando vídeo: {video_path_for_analysis}")
+            video_analysis = await video_analysis_service.analyze_video(video_path_for_analysis)
 
             if video_analysis:
                 video_transcript = video_analysis.get("transcript", "")
@@ -372,7 +402,15 @@ async def process_metadata_auto(request: ProcessMetadataAutoRequest):
             else:
                 logger.warning("⚠️ Análise de vídeo falhou, continuando sem transcrição/visual")
 
-        # Processar metadados com Claude (com transcript + visual)
+            # Limpa arquivo temporário
+            if temp_video_file and os.path.exists(temp_video_file.name):
+                try:
+                    os.unlink(temp_video_file.name)
+                    logger.info(f"🧹 Arquivo temporário removido")
+                except Exception as e:
+                    logger.warning(f"⚠️ Não foi possível remover arquivo temporário: {e}")
+
+        # Processar metadados com Claude (com transcript + visual + user_context)
         logger.info("🤖 Processando metadados automaticamente...")
         result = await claude_service.process_metadata_auto(
             title=request.title,
@@ -380,7 +418,8 @@ async def process_metadata_auto(request: ProcessMetadataAutoRequest):
             hashtags=request.hashtags or [],
             top_comments=request.top_comments or [],
             video_transcript=video_transcript,
-            visual_analysis=visual_analysis
+            visual_analysis=visual_analysis,
+            user_context=request.user_context or ""  # ⭐ PRIORIDADE MÁXIMA (40% de peso)
         )
 
         if not result:
@@ -402,7 +441,8 @@ async def process_metadata_auto(request: ProcessMetadataAutoRequest):
             visual_analysis=visual_analysis if visual_analysis else None,
             transcript_language=transcript_language if transcript_language else None,
             video_transcript_pt=video_transcript_pt,
-            visual_analysis_pt=visual_analysis_pt
+            visual_analysis_pt=visual_analysis_pt,
+            filtered_comments=result.get("filtered_comments", [])
         )
 
     except Exception as e:
@@ -518,6 +558,90 @@ async def transcribe_audio(audio_file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"❌ Erro em /api/transcribe-audio: {str(e)}")
         return {"success": False, "error": f"Erro ao transcrever: {str(e)}"}
+
+
+# ============================================================
+# ANÁLISE MULTIMODAL DE VÍDEO (Whisper + GPT-4 Vision)
+# ============================================================
+
+class AnalyzeVideoRequest(BaseModel):
+    cloud_video_url: str
+
+
+class AnalyzeVideoResponse(BaseModel):
+    success: bool
+    video_transcript: Optional[str] = None
+    visual_analysis: Optional[str] = None
+    transcript_language: Optional[str] = None
+    error: Optional[str] = None
+
+
+@app.post("/api/analyze-video", response_model=AnalyzeVideoResponse)
+async def analyze_video(request: AnalyzeVideoRequest):
+    """
+    Analisa vídeo que já está na cloud (Whisper + GPT-4 Vision).
+
+    Fluxo:
+    1. Baixa vídeo temporariamente da cloud URL
+    2. Extrai áudio e analisa com Whisper
+    3. Extrai frames e analisa com GPT-4 Vision
+    4. Retorna transcrição, análise visual e idioma
+    """
+    import httpx
+
+    try:
+        logger.info(f"🎬 Analisando vídeo da cloud: {request.cloud_video_url[:50]}...")
+
+        if not video_analysis_service.is_available():
+            raise HTTPException(
+                status_code=503,
+                detail="Serviço de análise multimodal não disponível (OPENAI_API_KEY não configurada)"
+            )
+
+        # 1. Baixar vídeo temporariamente
+        logger.info(f"⬇️  Baixando vídeo da cloud...")
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            response = await client.get(request.cloud_video_url)
+            response.raise_for_status()
+            video_data = response.content
+
+        # 2. Salvar em arquivo temporário
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as temp_video:
+            temp_video.write(video_data)
+            temp_video_path = temp_video.name
+
+        logger.info(f"✅ Vídeo baixado: {len(video_data) / (1024 * 1024):.2f}MB")
+
+        # 3. Analisar vídeo (Whisper + GPT-4 Vision)
+        logger.info(f"🎤🖼️  Analisando com Whisper + GPT-4 Vision...")
+        analysis_result = await video_analysis_service.analyze_video(temp_video_path)
+
+        # 4. Limpar arquivo temporário
+        try:
+            os.unlink(temp_video_path)
+        except:
+            pass
+
+        if not analysis_result:
+            raise HTTPException(status_code=500, detail="Análise multimodal falhou")
+
+        logger.info(f"✅ Análise multimodal concluída!")
+        logger.info(f"   - Transcrição: {len(analysis_result.get('transcript', ''))} chars ({analysis_result.get('language', 'N/A')})")
+        logger.info(f"   - Análise Visual: {len(analysis_result.get('visual_analysis', ''))} chars")
+
+        return {
+            "success": True,
+            "video_transcript": analysis_result.get("transcript"),
+            "visual_analysis": analysis_result.get("visual_analysis"),
+            "transcript_language": analysis_result.get("language"),
+        }
+
+    except httpx.HTTPError as e:
+        logger.error(f"❌ Erro ao baixar vídeo da cloud: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro ao baixar vídeo: {str(e)}")
+    except Exception as e:
+        logger.error(f"❌ Erro ao analisar vídeo: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro ao analisar vídeo: {str(e)}")
 
 
 # ============================================================
