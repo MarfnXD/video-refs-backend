@@ -907,7 +907,31 @@ async def process_video_to_supabase(request: ProcessToSupabaseRequest):
 
         logger.info(f"✅ Transcodificado: {file_size_mb:.2f}MB")
 
-        # 3. Upload direto para Supabase Storage
+        # 3.5. Análise Multimodal (opcional mas recomendado)
+        video_transcript = None
+        visual_analysis = None
+        transcript_language = None
+
+        if video_analysis_service.is_available():
+            try:
+                logger.info(f"🎤🖼️  Analisando vídeo (áudio + visual)...")
+                video_analysis = await video_analysis_service.analyze_video(transcoded_path)
+
+                if video_analysis:
+                    video_transcript = video_analysis.get("transcript", "")
+                    visual_analysis = video_analysis.get("visual_analysis", "")
+                    transcript_language = video_analysis.get("language", "")
+
+                    logger.info(f"✅ Análise multimodal concluída!")
+                    logger.info(f"   - Transcrição: {len(video_transcript)} chars ({transcript_language})")
+                    logger.info(f"   - Análise Visual: {len(visual_analysis)} chars")
+            except Exception as analysis_error:
+                # Não crítico - continua mesmo se análise falhar
+                logger.warning(f"⚠️  Análise multimodal falhou (não crítico): {str(analysis_error)}")
+        else:
+            logger.info(f"⏭️  Análise multimodal desabilitada (OPENAI_API_KEY não configurada)")
+
+        # 4. Upload direto para Supabase Storage
         logger.info(f"☁️  Fazendo upload para Supabase...")
 
         storage_path = f"{request.user_id}/{request.bookmark_id}.mp4"
@@ -939,6 +963,16 @@ async def process_video_to_supabase(request: ProcessToSupabaseRequest):
         # Adiciona thumbnail URL se disponível
         if cloud_thumbnail_url:
             update_data['cloud_thumbnail_url'] = cloud_thumbnail_url
+
+        # Adiciona dados de análise multimodal se disponíveis
+        if video_transcript:
+            update_data['video_transcript'] = video_transcript
+        if visual_analysis:
+            update_data['visual_analysis'] = visual_analysis
+        if transcript_language:
+            update_data['transcript_language'] = transcript_language
+        if video_transcript or visual_analysis:
+            update_data['analyzed_at'] = datetime.utcnow().isoformat()
 
         supabase_client.table('bookmarks').update(update_data).eq('id', request.bookmark_id).execute()
 
