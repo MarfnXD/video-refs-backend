@@ -450,6 +450,189 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
   "relevance_score": 0.0-1.0 (quão relevante/útil é esse vídeo como referência)
 }}"""
 
+    async def process_metadata_with_gemini(
+        self,
+        title: str,
+        description: str = "",
+        hashtags: List[str] = None,
+        top_comments: List[Dict] = None,
+        gemini_analysis: Dict = None,
+        user_context: str = ""
+    ) -> Optional[Dict]:
+        """
+        **NOVO MÉTODO - GEMINI FLASH 2.5 INTEGRATION**
+
+        Processa metadados do vídeo usando análise completa do Gemini Flash 2.5
+
+        Args:
+            title: Título do vídeo
+            description: Descrição do vídeo
+            hashtags: Lista de hashtags
+            top_comments: Lista de comentários top [{text, likes, author}]
+            gemini_analysis: Dict completo retornado pelo Gemini:
+                - transcript: Transcrição completa (áudio + legendas)
+                - visual_analysis: Análise visual detalhada
+                - editing_techniques: Lista de técnicas de edição
+                - storytelling: Estrutura narrativa
+                - is_fooh: Boolean (True se FOOH detected)
+                - technical_quality: "high" | "medium" | "low"
+                - language: Idioma detectado
+                - confidence: 0.0-1.0
+            user_context: Contexto manual do usuário (opcional - peso máximo 40%)
+
+        Returns:
+            Dict com auto_description, auto_tags, auto_categories, relevance_score
+        """
+        if not self.client:
+            logger.error("❌ Claude client não inicializado (REPLICATE_API_TOKEN faltando)")
+            return None
+
+        try:
+            logger.info(f"🤖 Processando metadados com Gemini analysis (novo método)...")
+
+            # Preparar dados
+            hashtags_str = ", ".join(hashtags) if hashtags else "Nenhuma"
+
+            # Filtrar comentários
+            filtered_comments_list = []
+            if top_comments:
+                filtered_comments_list = self._filter_and_prioritize_comments(top_comments, max_count=50)
+                comments_str = self._format_filtered_comments(filtered_comments_list)
+            else:
+                comments_str = "Nenhum"
+
+            # Extrair dados do Gemini
+            gemini_transcript = gemini_analysis.get('transcript', '') if gemini_analysis else ''
+            gemini_visual = gemini_analysis.get('visual_analysis', '') if gemini_analysis else ''
+            gemini_editing = gemini_analysis.get('editing_techniques', []) if gemini_analysis else []
+            gemini_storytelling = gemini_analysis.get('storytelling', '') if gemini_analysis else ''
+            gemini_is_fooh = gemini_analysis.get('is_fooh', False) if gemini_analysis else False
+            gemini_quality = gemini_analysis.get('technical_quality', 'medium') if gemini_analysis else 'medium'
+
+            # Formatar técnicas de edição
+            editing_str = ", ".join(gemini_editing) if gemini_editing else "Nenhuma detectada"
+
+            # Montar prompt enriquecido com análise do Gemini
+            prompt = f"""Você é um especialista em análise de vídeos de referência para marketing e publicidade.
+
+Analise os metadados abaixo e gere tags/categorias automaticamente.
+
+📊 METADADOS DO VÍDEO:
+
+**Título**: {title}
+**Descrição**: {description if description else "Nenhuma"}
+**Hashtags**: {hashtags_str}
+**Comentários Relevantes**: {comments_str}
+
+🎬 ANÁLISE MULTIMODAL (GEMINI FLASH 2.5):
+
+**Transcrição Completa** (áudio + legendas + texto na tela):
+{gemini_transcript if gemini_transcript else "Não disponível"}
+
+**Análise Visual Detalhada**:
+{gemini_visual if gemini_visual else "Não disponível"}
+
+**Técnicas de Edição Detectadas**:
+{editing_str}
+
+**Storytelling / Estrutura Narrativa**:
+{gemini_storytelling if gemini_storytelling else "Não detectado"}
+
+**Qualidade Técnica**: {gemini_quality}
+
+**FOOH Detectado**: {"✅ SIM - Este é um vídeo FOOH (Fake Out-Of-Home / CGI Advertising)" if gemini_is_fooh else "❌ NÃO - Este NÃO é um FOOH"}"""
+
+            # Se usuário forneceu contexto, adicionar com peso MÁXIMO
+            if user_context:
+                prompt += f"""
+
+🎯 CONTEXTO DO USUÁRIO (PESO MÁXIMO - 40%):
+"{user_context}"
+
+⚠️ PRIORIZE o contexto do usuário acima de tudo! Ele sabe POR QUE está salvando este vídeo."""
+
+            prompt += """
+
+📋 SUA TAREFA:
+
+1. Gere uma **auto_description** concisa (1-2 frases) do QUE É o vídeo
+2. Gere 5 **auto_tags** técnicas específicas (ex: color grading, jump cut, FOOH, storytelling)
+3. Sugira 1-3 **auto_categories** (ex: Técnica de Edição, FOOH / CGI Advertising, Storytelling)
+4. Dê um **relevance_score** de 0.0-1.0 (quão útil é como referência)
+
+⚠️ REGRAS IMPORTANTES:
+
+- Se Gemini detectou **is_fooh = TRUE**, SEMPRE inclua "FOOH / CGI Advertising" nas categorias
+- Se Gemini detectou técnicas de edição específicas, crie tags pra elas (ex: jump-cut, speed-ramp)
+- Se transcrição menciona termos técnicos (CGI, VFX, 3D), adicione tags relacionadas
+- Se análise visual descreve estilo específico (minimalista, maximalista), adicione tag
+- **CONTEXTO DO USUÁRIO** tem peso máximo (40%) - priorize o que ELE quer aprender
+
+HIERARQUIA DE CONFIANÇA:
+1️⃣ Contexto do usuário = 40% (se fornecido)
+2️⃣ Análise Visual (Gemini) = 30%
+3️⃣ Transcrição (Gemini) = 20%
+4️⃣ Título + Descrição = 15%
+5️⃣ Hashtags = 10%
+6️⃣ Comentários = 5%
+
+CATEGORIAS PADRÕES (sugira 1-3 mais relevantes):
+- Técnica de Edição
+- Referência Visual
+- Ideia de Conteúdo
+- Áudio/Música
+- Ferramenta/Software
+- Mecânica de Campanha
+- Storytelling
+- Tutorial
+- Case de Sucesso
+- FOOH / CGI Advertising
+- Outro
+
+RETORNE APENAS JSON (sem markdown, sem explicações):
+{{
+  "auto_description": "string",
+  "auto_tags": ["tag1", "tag2", "tag3", "tag4", "tag5"],
+  "auto_categories": ["categoria1", "categoria2"],
+  "confidence": "high|medium|low",
+  "relevance_score": 0.0-1.0
+}}"""
+
+            # Chamar Claude via Replicate
+            output = self.client.run(
+                "anthropic/claude-3.5-sonnet",
+                input={
+                    "prompt": prompt,
+                    "max_tokens": 1024,
+                    "temperature": 0.2,
+                    "top_p": 0.9
+                }
+            )
+
+            # Extrair resposta
+            response_text = ""
+            for chunk in output:
+                response_text += chunk
+
+            logger.debug(f"Resposta Claude (Gemini integration): {response_text}")
+
+            # Parse JSON
+            result = json.loads(response_text)
+
+            # Adicionar comentários filtrados
+            result['filtered_comments'] = filtered_comments_list
+
+            logger.info(f"✅ Processamento com Gemini concluído: {len(result.get('auto_tags', []))} tags, FOOH: {gemini_is_fooh}")
+            return result
+
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ Erro ao parsear JSON da resposta Claude (Gemini): {str(e)}")
+            logger.error(f"Resposta raw: {response_text}")
+            return None
+        except Exception as e:
+            logger.error(f"❌ Erro ao processar metadados com Gemini: {str(e)}")
+            return None
+
     def is_available(self) -> bool:
         """Verifica se o serviço está disponível"""
         return self.client is not None

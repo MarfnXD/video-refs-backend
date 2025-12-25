@@ -20,6 +20,9 @@ from services.thumbnail_service import ThumbnailService
 from services.video_analysis_service import video_analysis_service
 from supabase import create_client, Client
 
+# Celery tasks (job queue)
+from tasks import process_bookmark_complete_task
+
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1141,6 +1144,144 @@ async def process_video_to_supabase(request: ProcessToSupabaseRequest):
         return ProcessToSupabaseResponse(
             success=False,
             error=str(e)
+        )
+
+
+# ============================================================================
+# NOVO ENDPOINT: Processamento completo em background (Celery)
+# ============================================================================
+
+class ProcessBookmarkCompleteRequest(BaseModel):
+    """
+    Request para processamento completo de bookmark em background
+    """
+    bookmark_id: str
+    url: str
+    user_id: str
+    extract_metadata: bool = True
+    analyze_video: bool = True
+    process_ai: bool = True
+    upload_to_cloud: bool = False
+    user_context: Optional[str] = None  # Contexto do usuário (peso 40% na IA)
+
+
+class ProcessBookmarkCompleteResponse(BaseModel):
+    """
+    Response imediata com job_id
+    """
+    success: bool
+    job_id: str = None
+    bookmark_id: str = None
+    estimated_time_seconds: int = None
+    message: str = None
+    error: str = None
+
+
+@app.post("/api/process-bookmark-complete", response_model=ProcessBookmarkCompleteResponse)
+async def process_bookmark_complete(request: ProcessBookmarkCompleteRequest):
+    """
+    **NOVO ENDPOINT - PROCESSAMENTO 100% EM BACKGROUND**
+
+    Enfileira bookmark para processamento completo assíncrono.
+    Celular só envia requisição e desconecta - backend processa TUDO em background.
+
+    **Fluxo:**
+    1. Valida requisição
+    2. Cria job na fila (Celery + Redis)
+    3. Retorna job_id IMEDIATAMENTE
+    4. Workers processam em background:
+       - Extração de metadados (Apify)
+       - Análise de vídeo (Gemini Flash 2.5)
+       - Processamento de IA (Claude)
+       - Upload pra cloud (Supabase Storage)
+       - Cleanup e notificação
+    5. Celular sincroniza via Supabase Realtime
+
+    **Parâmetros:**
+    - bookmark_id: UUID do bookmark (já criado no Supabase)
+    - url: URL do vídeo (YouTube/Instagram/TikTok)
+    - user_id: UUID do usuário
+    - extract_metadata: Extrair metadados? (padrão: True)
+    - analyze_video: Analisar vídeo com Gemini? (padrão: True)
+    - process_ai: Processar com Claude? (padrão: True)
+    - upload_to_cloud: Upload de vídeo pra cloud? (padrão: False - economia de banda)
+    - user_context: Contexto do usuário (opcional, peso 40% na IA)
+
+    **Retorna:**
+    - success: True/False
+    - job_id: ID do job Celery (para monitoramento)
+    - estimated_time_seconds: Tempo estimado (90-180s)
+
+    **Vantagens:**
+    - ✅ Celular NÃO precisa ficar aberto
+    - ✅ Processamento paralelo (10-20 jobs simultâneos)
+    - ✅ Retry automático se falhar
+    - ✅ Vídeo NÃO trafega pelo celular
+    - ✅ Celular sincroniza automaticamente via Realtime
+    """
+    try:
+        logger.info(f"🚀 Nova requisição de processamento - Bookmark: {request.bookmark_id}")
+
+        # Validações básicas
+        if not request.bookmark_id or not request.url or not request.user_id:
+            return ProcessBookmarkCompleteResponse(
+                success=False,
+                error="bookmark_id, url e user_id são obrigatórios"
+            )
+
+        # Atualizar status inicial no Supabase: queued
+        try:
+            supabase_client.table('bookmarks').update({
+                'processing_status': 'queued',
+                'error_message': None
+            }).eq('id', request.bookmark_id).execute()
+        except Exception as e:
+            logger.warning(f"⚠️ Erro ao atualizar status inicial (bookmark pode não existir): {str(e)}")
+            # Não bloqueia - task vai criar/atualizar depois
+
+        # Enfileirar task no Celery
+        task = process_bookmark_complete_task.apply_async(
+            kwargs={
+                'bookmark_id': request.bookmark_id,
+                'url': request.url,
+                'user_id': request.user_id,
+                'extract_metadata': request.extract_metadata,
+                'analyze_video': request.analyze_video,
+                'process_ai': request.process_ai,
+                'upload_to_cloud': request.upload_to_cloud,
+            },
+            # Retry policy
+            retry=True,
+            retry_policy={
+                'max_retries': 3,
+                'interval_start': 5,  # Espera 5s antes do primeiro retry
+                'interval_step': 10,  # Incrementa 10s a cada retry
+                'interval_max': 60,   # Máximo 60s entre retries
+            }
+        )
+
+        # Estimar tempo de processamento
+        estimated_time = 90  # Base: 90s
+        if request.analyze_video:
+            estimated_time += 60  # +60s para Gemini
+        if request.upload_to_cloud:
+            estimated_time += 30  # +30s para upload
+
+        logger.info(f"✅ Job enfileirado - Bookmark: {request.bookmark_id}, Job ID: {task.id}")
+
+        return ProcessBookmarkCompleteResponse(
+            success=True,
+            job_id=task.id,
+            bookmark_id=request.bookmark_id,
+            estimated_time_seconds=estimated_time,
+            message=f"Bookmark enfileirado para processamento. Tempo estimado: {estimated_time}s"
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Erro ao enfileirar job - Bookmark: {request.bookmark_id}, Erro: {str(e)}")
+        return ProcessBookmarkCompleteResponse(
+            success=False,
+            error=f"Erro ao enfileirar processamento: {str(e)}"
         )
 
 
