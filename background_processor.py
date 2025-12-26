@@ -180,8 +180,8 @@ async def process_bookmark_background(
             update_data['title'] = metadata.get('title')
             update_data['original_title'] = metadata.get('title')  # Preserva título original
             update_data['platform'] = metadata.get('platform')
-            update_data['thumbnail'] = metadata.get('thumbnail_url')  # URL original da thumbnail
-            update_data['cloud_thumbnail_url'] = metadata.get('cloud_thumbnail_url')  # URL permanente da thumbnail no Supabase Storage
+            update_data['thumbnail'] = metadata.get('thumbnail_url')  # URL da thumbnail
+            update_data['cloud_thumbnail_url'] = metadata.get('thumbnail_url')  # URL permanente da thumbnail no Supabase Storage (Apify já faz upload)
             update_data['published_at'] = metadata.get('published_at')  # Data de publicação
             update_data['metadata'] = metadata  # JSON completo com TODOS os campos
 
