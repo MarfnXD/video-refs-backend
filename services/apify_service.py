@@ -350,7 +350,10 @@ class ApifyService:
                 "resultsLimit": 1,
                 "searchType": "hashtag",
                 "searchLimit": 1,
-                "addParentData": False  # Reduz dados para evitar timeouts
+                "addParentData": False,  # Reduz dados para evitar timeouts
+                "commentsLimit": 200,  # ← NOVO: Solicitar 200 comentários
+                "extendOutputFunction": "",
+                "extendScraperFunction": ""
             }
 
             # Função para executar scraping Instagram com um cliente específico
