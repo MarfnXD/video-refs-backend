@@ -89,9 +89,9 @@ def process_bookmark_complete_task(
 
     Executa em cadeia (chain):
     1. Extrai metadados (Apify)
-    2. Analisa vídeo com Gemini 2.5 Flash (se upload_to_cloud=True)
-    3. Processa com Gemini 3.0 Pro (tags, categorias, descrição)
-    4. Upload pra cloud (se upload_to_cloud=True)
+    2. Upload pra cloud (se upload_to_cloud=True) - ANTES da análise!
+    3. Analisa vídeo com Gemini 2.5 Flash (usa cloud_video_url)
+    4. Processa com Gemini 3.0 Pro (tags, categorias, descrição)
     5. Cleanup e notificação
 
     Args:
@@ -124,19 +124,19 @@ def process_bookmark_complete_task(
             # Primeira task: passa parâmetros explícitos
             workflow = extract_metadata_task.s(bookmark_id, url, user_id)
 
-            # 2. Análise com Gemini (recebe resultado da extração via previous_result)
+            # 2. Upload pra cloud (ANTES da análise - URLs do Instagram expiram rápido!)
+            if upload_to_cloud:
+                workflow |= upload_to_cloud_task.s(bookmark_id, user_id)
+
+            # 3. Análise com Gemini (usa cloud_video_url se disponível)
             if analyze_video:
                 # Gemini precisa dos dados da task anterior + bookmark_id + url
                 # .s() cria signature parcial - primeiro arg vem da task anterior
                 workflow |= analyze_video_gemini_task.s(bookmark_id, url)
 
-            # 3. Processamento Gemini 3.0 Pro (recebe resultado anterior)
+            # 4. Processamento Gemini 3.0 Pro (recebe resultado anterior)
             if process_ai:
                 workflow |= process_claude_task.s(bookmark_id, user_id)
-
-            # 4. Upload pra cloud (opcional)
-            if upload_to_cloud:
-                workflow |= upload_to_cloud_task.s(bookmark_id, user_id)
 
             # 5. Cleanup final (sempre roda)
             workflow |= cleanup_and_notify_task.s(bookmark_id, user_id)
@@ -152,16 +152,16 @@ def process_bookmark_complete_task(
                 user_id
             ).apply_async()
 
-        # Log estruturado do pipeline
+        # Log estruturado do pipeline (ordem de execução)
         pipeline_config = []
         if extract_metadata:
             pipeline_config.append("Metadata:✓")
+        if upload_to_cloud:
+            pipeline_config.append("Upload:✓")
         if analyze_video:
             pipeline_config.append("Gemini:✓")
         if process_ai:
             pipeline_config.append("Gemini Pro:✓")
-        if upload_to_cloud:
-            pipeline_config.append("Upload:✓")
 
         logger.info(
             f"✅ [PIPELINE] {bookmark_id} - CRIADO | "
@@ -668,16 +668,16 @@ def cleanup_and_notify_task(self, previous_result: dict, bookmark_id: str, user_
         # 2. Atualizar status final no Supabase
         update_bookmark_status(bookmark_id, "completed", self.request.id, error_message=None)
 
-        # 3. LOG RESUMO FINAL (uma linha com tudo)
+        # 3. LOG RESUMO FINAL (uma linha com tudo - ordem de execução)
         pipeline_summary = []
         if previous_result.get('metadata_extracted'):
             pipeline_summary.append("Metadata:✓")
+        if previous_result.get('cloud_uploaded'):
+            pipeline_summary.append("Upload:✓")
         if previous_result.get('video_analyzed'):
             pipeline_summary.append("Gemini:✓")
         if previous_result.get('ai_processed'):
             pipeline_summary.append("Gemini Pro:✓")
-        if previous_result.get('cloud_uploaded'):
-            pipeline_summary.append("Upload:✓")
 
         tags_count = len(previous_result.get('auto_tags', []))
         cats_count = len(previous_result.get('auto_categories', []))
