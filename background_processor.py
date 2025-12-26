@@ -178,8 +178,11 @@ async def process_bookmark_background(
         # Todos os outros dados estão no campo metadata (JSON)
         if metadata:
             update_data['title'] = metadata.get('title')
+            update_data['original_title'] = metadata.get('title')  # Preserva título original
             update_data['platform'] = metadata.get('platform')
+            update_data['thumbnail'] = metadata.get('thumbnail_url')  # URL original da thumbnail
             update_data['cloud_thumbnail_url'] = metadata.get('cloud_thumbnail_url')  # URL permanente da thumbnail no Supabase Storage
+            update_data['published_at'] = metadata.get('published_at')  # Data de publicação
             update_data['metadata'] = metadata  # JSON completo com TODOS os campos
 
         # Adicionar análise Gemini se rodou
@@ -189,9 +192,14 @@ async def process_bookmark_background(
             update_data['transcript_language'] = gemini_analysis.get('language')
             update_data['analyzed_at'] = 'now()'
 
+        # Adicionar contexto do usuário (CRÍTICO - não pode perder!)
+        if user_context:
+            update_data['user_context_raw'] = user_context
+
         # Adicionar resultados da IA se processou
         if auto_description:
             update_data['auto_description'] = auto_description
+            update_data['ai_processed'] = True  # Flag indicando processamento IA
         if auto_tags:
             update_data['auto_tags'] = auto_tags
         if auto_categories:
