@@ -97,88 +97,52 @@ class GeminiService:
 
     def _build_analysis_prompt(self, user_context: Optional[str] = None) -> str:
         """
-        Monta prompt otimizado para análise de vídeo
+        Monta prompt SIMPLES e OBJETIVO para análise de vídeo
 
-        Foco:
-        - Transcrição completa (áudio + legendas + texto na tela)
-        - Técnicas visuais e de edição
-        - Detecção de FOOH/CGI
-        - Estrutura narrativa
-        - Qualidade técnica
+        Foco: Descrição literal em timeline, sem interpretações ou categorizações forçadas
         """
-        base_prompt = """Você é um especialista em análise de vídeos de referência para marketing e publicidade.
+        base_prompt = """Assista este vídeo e descreva o que você vê e ouve AO LONGO DO TEMPO.
 
-Analise este vídeo COMPLETAMENTE e retorne um JSON estruturado com:
+Use formato de timeline (aproximado, não precisa ser exato ao segundo):
 
-1. **transcript** (string): Transcrição COMPLETA de:
-   - Todo o áudio (narração, diálogos, música com letra)
-   - Todas as legendas e texto na tela
-   - Descrição de sons importantes (se relevante)
+[00:00 - 00:05]
+- Visual: [descreva EXATAMENTE o que você VÊ na tela - cenário, personagens/objetos, ações, cores, tipo de imagem (animação 3D, filmagem real, desenho 2D, etc)]
+- Áudio: [descreva o que você OUVE - falas/diálogos literais, música, sons, narração]
+- Texto na tela: [se houver texto visível, transcreva aqui]
 
-2. **visual_analysis** (string): Análise visual detalhada:
-   - Estilo visual (minimalista, maximalista, moderno, retrô, etc)
-   - Color grading (paleta de cores, mood, contraste)
-   - Composição (rule of thirds, simetria, leading lines)
-   - Typography (se houver texto animado)
-   - Motion graphics (animações, transições criativas)
-   - Elementos CGI/3D (objetos, ambientes, efeitos)
+[00:05 - 00:10]
+- Visual: [...]
+- Áudio: [...]
+- Texto na tela: [...]
 
-3. **editing_techniques** (lista de strings): Técnicas de edição detectadas:
-   - Tipos de corte (jump cut, match cut, L-cut, J-cut, smash cut)
-   - Velocidade (slow motion, speed ramp, time remap, hyperlapse)
-   - Transições (cut, dissolve, wipe, morph, glitch)
-   - Ritmo de edição (fast-paced, contemplative, rhythmic, dynamic)
-   - Efeitos especiais (VFX, compositing, chroma key)
+Continue dividindo o vídeo em segmentos até o fim.
 
-4. **storytelling** (string): Estrutura narrativa:
-   - Tipo (linear, não-linear, circular, montage)
-   - Arco (setup → conflito → resolução, ou problema → solução)
-   - Timing (quando revelações acontecem, pacing)
-   - Emoção predominante (inspirador, engraçado, dramático, etc)
+REGRAS:
+1. Seja DESCRITIVO e OBJETIVO - apenas relate o que VÊ e OUVE
+2. Não interprete, não categorize, não force em estruturas pré-definidas
+3. Se for animação, mencione naturalmente (ex: "personagem animado em 3D estilo Pixar")
+4. Se for filmagem real, descreva naturalmente (ex: "pessoa real em ambiente urbano")
+5. Transcreva falas/diálogos literalmente (palavra por palavra se possível)
+6. Se algo muda na tela (troca de cena, novo personagem, efeito visual), mencione quando acontece
 
-5. **is_fooh** (boolean): Este é um vídeo FOOH (Fake Out-Of-Home) / CGI Advertising?
-   - FOOH = objetos 3D/CGI integrados em ambientes REAIS externos (outdoor)
-   - Características: objeto 3D gigante, física impossível, ambiente real filmado
-   - Exemplos: carro 3D saindo de billboard, produto gigante na rua, animação 3D em prédio
-   - Retorne TRUE apenas se tiver CERTEZA que é FOOH
+Descreva como se estivesse contando o vídeo para alguém que não pode vê-lo."""
 
-6. **technical_quality** (string): "high" | "medium" | "low"
-   - high: profissional, iluminação perfeita, áudio limpo, edição polida
-   - medium: semi-profissional, boa qualidade mas não impecável
-   - low: amador, celular, áudio ruim, edição básica
-
-7. **language** (string): Idioma detectado (pt, en, es, fr, etc)
-   - Se múltiplos idiomas, retorne o predominante
-
-8. **confidence** (float): 0.0-1.0
-   - Quão confiante você está nesta análise?
-
-**IMPORTANTE:**
-- Seja MUITO detalhado na transcrição (capture TUDO que é dito)
-- Na visual_analysis, descreva o que VÊ (não apenas categorize)
-- Liste TODAS as técnicas de edição que conseguir identificar
-- Se não tiver certeza se é FOOH, coloque FALSE (evite falsos positivos)
-
-Retorne APENAS o JSON, sem texto extra:"""
-
-        # Se usuário forneceu contexto, adicionar com peso MÁXIMO
+        # Se usuário forneceu contexto, adicionar como nota
         if user_context:
             base_prompt += f"""
 
-**CONTEXTO DO USUÁRIO (PESO MÁXIMO - 40%):**
+NOTA: O usuário salvou este vídeo com o seguinte contexto pessoal:
 "{user_context}"
 
-Use este contexto para entender POR QUE o usuário está salvando este vídeo.
-Isso deve influenciar MUITO sua análise (especialmente tags e categorias que você sugeriria)."""
+(Isso é apenas informação adicional - continue descrevendo objetivamente o que VÊ no vídeo)"""
 
         return base_prompt
 
     def _parse_gemini_output(self, output: any) -> Optional[Dict]:
         """
-        Parse output do Gemini e converte pra dict estruturado
+        Parse output do Gemini (agora em formato livre de timeline)
 
-        Gemini retorna texto (possivelmente JSON ou markdown)
-        Precisa fazer parsing robusto
+        Não força JSON estruturado - aceita texto livre e retorna como está
         """
         try:
             # Gemini pode retornar string ou iterator
@@ -189,49 +153,29 @@ Isso deve influenciar MUITO sua análise (especialmente tags e categorias que vo
 
             logger.debug(f"Output bruto do Gemini: {output_text[:500]}...")
 
-            # Tentar parsear como JSON
-            # Gemini às vezes retorna markdown com ```json ... ```
+            # Limpar markdown code blocks se houver
             output_text = output_text.strip()
+            if output_text.startswith("```"):
+                # Remover ``` do início e fim
+                lines = output_text.split('\n')
+                if lines[0].startswith('```'):
+                    lines = lines[1:]
+                if lines and lines[-1].strip() == '```':
+                    lines = lines[:-1]
+                output_text = '\n'.join(lines).strip()
 
-            # Remover markdown code block se presente
-            if output_text.startswith("```json"):
-                output_text = output_text.replace("```json", "").replace("```", "").strip()
-            elif output_text.startswith("```"):
-                output_text = output_text.replace("```", "").strip()
-
-            # Parsear JSON
-            result = json.loads(output_text)
-
-            # Validar campos obrigatórios
-            required_fields = [
-                'transcript', 'visual_analysis', 'editing_techniques',
-                'storytelling', 'is_fooh', 'technical_quality',
-                'language', 'confidence'
-            ]
-
-            for field in required_fields:
-                if field not in result:
-                    logger.warning(f"⚠️ Campo '{field}' faltando no output do Gemini")
-                    # Adicionar default
-                    if field == 'editing_techniques':
-                        result[field] = []
-                    elif field == 'is_fooh':
-                        result[field] = False
-                    elif field == 'confidence':
-                        result[field] = 0.5
-                    elif field == 'language':
-                        result[field] = 'unknown'
-                    elif field == 'technical_quality':
-                        result[field] = 'medium'
-                    else:
-                        result[field] = ""
+            # Retornar em formato simples
+            # transcript = descrição completa em timeline
+            # visual_analysis = mesmo conteúdo (para compatibilidade com campos do banco)
+            result = {
+                'transcript': output_text,
+                'visual_analysis': output_text,  # Mesmo conteúdo
+                'language': 'unknown',  # Claude pode detectar depois
+                'confidence': 0.9  # Alta confiança em descrição literal
+            }
 
             return result
 
-        except json.JSONDecodeError as e:
-            logger.error(f"❌ Erro ao parsear JSON do Gemini: {str(e)}")
-            logger.error(f"Output problemático: {output_text[:1000]}...")
-            return None
         except Exception as e:
             logger.error(f"❌ Erro ao processar output do Gemini: {str(e)}")
             return None
