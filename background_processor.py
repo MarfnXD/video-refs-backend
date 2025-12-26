@@ -74,18 +74,24 @@ async def process_bookmark_background(
                 video_metadata = await apify_service.extract_metadata(url)
 
                 if video_metadata:
-                    # Converter VideoMetadata para dict
+                    # Converter VideoMetadata para dict (campos corretos do modelo)
                     metadata = {
                         'title': video_metadata.title,
                         'description': video_metadata.description,
                         'thumbnail_url': video_metadata.thumbnail_url,
-                        'direct_video_url': video_metadata.direct_video_url,
-                        'duration_seconds': video_metadata.duration_seconds,
-                        'view_count': video_metadata.view_count,
-                        'like_count': video_metadata.like_count,
-                        'comment_count': video_metadata.comment_count,
+                        'cloud_thumbnail_url': video_metadata.cloud_thumbnail_url,
+                        'duration': video_metadata.duration,
+                        'views': video_metadata.views,
+                        'likes': video_metadata.likes,
+                        'comments_count': video_metadata.comments_count,
+                        'author': video_metadata.author,
+                        'author_url': video_metadata.author_url,
+                        'published_at': video_metadata.published_at,
                         'hashtags': video_metadata.hashtags,
-                        'top_comments': video_metadata.top_comments,
+                        'top_comments': [
+                            {'text': c.text, 'author': c.author, 'likes': c.likes}
+                            for c in video_metadata.top_comments
+                        ] if video_metadata.top_comments else [],
                         'platform': video_metadata.platform.value if video_metadata.platform else None,
                     }
                     logger.info(f"✅ Metadados extraídos: {metadata.get('title', 'N/A')[:50]}")
@@ -98,20 +104,19 @@ async def process_bookmark_background(
         # ============================================================
         # PASSO 3: Analisar vídeo com Gemini Flash 2.5 (OPCIONAL)
         # ============================================================
+        # DESABILITADO TEMPORARIAMENTE - VideoMetadata não tem direct_video_url
+        # TODO: Integrar com serviço de download para obter URL direta
         gemini_analysis = None
-        if analyze_video and metadata and metadata.get('direct_video_url'):
-            logger.info(f"🎬 Analisando vídeo com Gemini Flash 2.5...")
-
-            try:
-                video_url = metadata.get('direct_video_url')
-                gemini_analysis = await gemini_service.analyze_video(
-                    video_url=video_url,
-                    user_context=user_context
-                )
-                logger.info(f"✅ Análise Gemini completa!")
-            except Exception as e:
-                logger.error(f"❌ Erro ao analisar com Gemini: {str(e)}")
-                # Não bloqueia - continua sem análise de vídeo
+        # if analyze_video and metadata:
+        #     logger.info(f"🎬 Analisando vídeo com Gemini Flash 2.5...")
+        #     try:
+        #         gemini_analysis = await gemini_service.analyze_video(
+        #             video_url=url,
+        #             user_context=user_context
+        #         )
+        #         logger.info(f"✅ Análise Gemini completa!")
+        #     except Exception as e:
+        #         logger.error(f"❌ Erro ao analisar com Gemini: {str(e)}")
 
         # ============================================================
         # PASSO 4: Processar com IA (Claude)
@@ -174,11 +179,14 @@ async def process_bookmark_background(
             update_data['original_title'] = metadata.get('title')  # Salva título original
             update_data['description'] = metadata.get('description')
             update_data['thumbnail_url'] = metadata.get('thumbnail_url')
-            update_data['direct_video_url'] = metadata.get('direct_video_url')
-            update_data['duration_seconds'] = metadata.get('duration_seconds')
-            update_data['view_count'] = metadata.get('view_count')
-            update_data['like_count'] = metadata.get('like_count')
-            update_data['comment_count'] = metadata.get('comment_count')
+            update_data['cloud_thumbnail_url'] = metadata.get('cloud_thumbnail_url')
+            update_data['duration'] = metadata.get('duration')
+            update_data['views'] = metadata.get('views')
+            update_data['likes'] = metadata.get('likes')
+            update_data['comments_count'] = metadata.get('comments_count')
+            update_data['author'] = metadata.get('author')
+            update_data['author_url'] = metadata.get('author_url')
+            update_data['published_at'] = metadata.get('published_at')
             update_data['platform'] = metadata.get('platform')
             update_data['metadata'] = metadata  # JSON completo
 
