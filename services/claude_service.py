@@ -335,100 +335,44 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
         user_context: str = ""
     ) -> str:
         """Constrói o prompt para processamento automático de metadados"""
-        return f"""Você é um assistente especializado em analisar vídeos de referência criativa.
+        return f"""Você é um assistente que extrai tags e categorias de vídeos de referência criativa.
 
-ANALISE OS METADADOS ABAIXO E EXTRAIA INFORMAÇÕES RELEVANTES:
+DADOS DISPONÍVEIS:
 
-👤 CONTEXTO MANUAL DO USUÁRIO (peso 40% - ⭐ PRIORIDADE MÁXIMA):
+👤 CONTEXTO DO USUÁRIO (peso máximo):
 {user_context if user_context else 'Não fornecido'}
-(Se fornecido, este é o motivo pelo qual o usuário salvou o vídeo - DEVE ter PESO MÁXIMO na análise!
-O auto_description DEVE refletir este contexto se disponível.)
 
-🖼️ ANÁLISE VISUAL (peso 35% - 🎯 FONTE MAIS CONFIÁVEL):
+🎬 DESCRIÇÃO DO VÍDEO (Gemini Flash 2.5 - timeline objetiva):
 {visual_analysis if visual_analysis else 'Não disponível'}
-(Análise automática de frames do vídeo via GPT-4 Vision - detecta CGI, VFX, FOOH, elementos visuais reais)
-⚠️ CRÍTICO: Se a análise visual contradiz outros dados (comentários, título), SEMPRE priorize a análise visual!
-Ela descreve o que REALMENTE está sendo mostrado no vídeo, não interpretações pessoais.
 
-🎤 TRANSCRIÇÃO DE ÁUDIO (peso 25%):
-{video_transcript if video_transcript else 'Não disponível'}
-(Transcrição automática do áudio do vídeo via Whisper AI - revela narrações, diálogos, técnicas mencionadas)
+📌 TÍTULO: "{title}"
+📄 DESCRIÇÃO: "{description or 'Não disponível'}"
+#️⃣ HASHTAGS: {hashtags_str}
+💬 COMENTÁRIOS: {comments_str}
 
-📌 TÍTULO (peso 12%): "{title}"
+INSTRUÇÕES:
 
-📄 DESCRIÇÃO (peso 10%):
-"{description or 'Não disponível'}"
+1. **Leia todos os dados objetivamente** - não force interpretações
+2. **Extraia o que REALMENTE está no vídeo** baseado na descrição do Gemini
+3. **Priorize o contexto do usuário** (se fornecido) - ele sabe por que salvou
+4. **Crie tags descritivas** baseadas no que VÊ, não no que imagina
+5. **Sugira categorias** que fazem sentido com o conteúdo real
 
-#️⃣ HASHTAGS (peso 8%):
-{hashtags_str}
+REGRAS:
+- Se descrição Gemini menciona "animação 3D", crie tag natural: "3d-animation"
+- Se menciona "filmagem real", não force tags de CGI
+- Se menciona técnicas específicas (jump cut, color grading), extraia como tags
+- NÃO invente informações que não estão nos dados
+- NÃO force categorias pré-concebidas (tipo FOOH) se não houver evidência clara
 
-💬 COMENTÁRIOS TOP FILTRADOS (peso 5% - ⚠️ MENOR PRIORIDADE):
-{comments_str}
-(Comentários genéricos já foram filtrados. ATENÇÃO: Comentários são interpretações PESSOAIS de usuários,
-podem estar completamente errados sobre o conteúdo real do vídeo. Use apenas como contexto secundário.
-Se comentários contradizem análise visual/transcrição, IGNORE os comentários!)
+HIERARQUIA (ordem de confiança):
+1️⃣ Contexto do usuário (se fornecido) = MÁXIMA prioridade
+2️⃣ Descrição do vídeo (Gemini) = fonte objetiva
+3️⃣ Título + Descrição = contexto adicional
+4️⃣ Hashtags = baixa confiança
+5️⃣ Comentários = MENOR confiança (interpretações pessoais)
 
-INSTRUÇÕES DE ANÁLISE:
-1. **⭐ PRIORIZE O CONTEXTO DO USUÁRIO ACIMA DE TUDO** (SE FORNECIDO):
-   - O contexto do usuário é o motivo REAL pelo qual ele salvou este vídeo
-   - Se fornecido, o auto_description DEVE começar refletindo este contexto
-   - Exemplo: Contexto="ref de transições suaves" → auto_description="Vídeo demonstrando técnicas de transições suaves..."
-   - Tags e categorias devem ser extraídas considerando PRINCIPALMENTE o contexto do usuário
-
-2. **Validação de Consistência**:
-   - Se o título NÃO se relaciona com a descrição, reduza o peso do título
-   - Se título for genérico tipo "😱", "TRENDING", priorize descrição/hashtags
-
-3. **⚠️ ANÁLISE VISUAL TEM PRIORIDADE ABSOLUTA SOBRE COMENTÁRIOS** (CRÍTICO):
-   - A análise visual descreve o que REALMENTE está no vídeo (CGI, objetos, cenários, técnicas)
-   - Comentários são interpretações PESSOAIS de usuários (podem estar completamente errados!)
-   - REGRA DE OURO: Se análise visual diz "cena celestial com CGI" mas comentários dizem "religião",
-     você DEVE basear tags/categorias na análise visual, NÃO nos comentários
-   - Comentários SÓ devem ser usados se NÃO contradizem análise visual/transcrição
-
-4. **Priorize ANÁLISE VISUAL e TRANSCRIÇÃO** (MUITO IMPORTANTE):
-   - Análise Visual (35%): detecta o que é MOSTRADO (CGI, FOOH, VFX, objetos 3D, cenários reais)
-   - Transcrição (25%): revela o que é DITO (narrações sobre técnicas, produtos, conceitos)
-   - Estes são dados OBJETIVOS, não interpretações
-   - Se análise visual mencionar "CGI", "FOOH", "3D objects", "cosmic scene" → PRIORIZE isso acima de tudo!
-
-5. **Extração Inteligente**:
-   - Identifique o TEMA PRINCIPAL do vídeo
-   - Extraia TÉCNICAS mencionadas (edição, efeitos, transições, etc)
-   - Identifique FERRAMENTAS/SOFTWARE citados
-   - Detecte CATEGORIA principal (tutorial, inspiração, case, técnica, etc)
-
-6. **Hierarquia de Relevância (ORDEM DE PRIORIDADE)**:
-   1️⃣ Contexto do usuário fornecido = ALTÍSSIMA confiança (40% - peso máximo!)
-   2️⃣ Análise Visual = ALTA confiança (35% - descreve o que está REALMENTE no vídeo)
-   3️⃣ Transcrição = alta confiança (25% - revela o que é dito/cantado)
-   4️⃣ Título + Descrição coerentes = média confiança (12% + 10%)
-   5️⃣ Hashtags = baixa confiança (8%)
-   6️⃣ Comentários = BAIXÍSSIMA confiança (5% - interpretações pessoais, podem estar errados)
-
-   ⚠️ SE HOUVER CONTRADIÇÃO: Análise Visual > Transcrição > Título/Descrição > Hashtags > Comentários
-
-7. **Detecção de FOOH (Fake Out-Of-Home / CGI Advertising)**:
-   ⚠️ ATENÇÃO: FOOHs são MUITO IMPORTANTES de detectar corretamente!
-
-   O QUE É FOOH:
-   - Vídeos de publicidade usando objetos 3D/CGI em ambientes reais externos
-   - "Fake" outdoor advertising (outdoor falso gerado por computador)
-   - Augmented reality advertising (AR) em espaços públicos
-   - Exemplos: objetos gigantes 3D "saindo" de telas outdoor, produtos flutuando em praças
-
-   COMO DETECTAR FOOH:
-   - Busque palavras-chave: "FOOH", "CGI", "3D", "fake", "augmented", "AR", "VFX", "visual effects", "outdoor", "billboard", "OOH"
-   - Contextos típicos: lançamento de produtos, eventos globais (Olimpíadas, Copa do Mundo), campanhas de marca
-   - Características visuais: objetos irreais/impossíveis em cenários urbanos externos
-   - Hashtags comuns: #FOOH, #CGI, #3D, #OutdoorAdvertising, #FakeOOH
-
-   SE DETECTAR FOOH:
-   - SEMPRE inclua "FOOH / CGI Advertising" nas categorias
-   - Adicione tags relacionadas: "fooh", "cgi", "3d", "outdoor-advertising", "vfx"
-   - Na auto_description, mencione explicitamente que é um FOOH
-
-CATEGORIAS PADRÕES (sugira 1-3 mais relevantes):
+CATEGORIAS DISPONÍVEIS (use as que REALMENTE fazem sentido):
 - Técnica de Edição
 - Referência Visual
 - Ideia de Conteúdo
@@ -438,16 +382,16 @@ CATEGORIAS PADRÕES (sugira 1-3 mais relevantes):
 - Storytelling
 - Tutorial
 - Case de Sucesso
-- FOOH / CGI Advertising
+- FOOH / CGI Advertising (APENAS se descrição Gemini mencionar explicitamente FOOH/outdoor CGI)
 - Outro
 
-RETORNE APENAS JSON (sem markdown, sem explicações):
+RETORNE APENAS JSON:
 {{
-  "auto_description": "string (resumo conciso 1-2 frases do QUE É o vídeo)",
+  "auto_description": "string (1-2 frases descrevendo objetivamente o vídeo)",
   "auto_tags": ["tag1", "tag2", "tag3", "tag4", "tag5"],
   "auto_categories": ["categoria1", "categoria2"],
   "confidence": "high|medium|low",
-  "relevance_score": 0.0-1.0 (quão relevante/útil é esse vídeo como referência)
+  "relevance_score": 0.0-1.0
 }}"""
 
     async def process_metadata_with_gemini(
@@ -460,25 +404,21 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
         user_context: str = ""
     ) -> Optional[Dict]:
         """
-        **NOVO MÉTODO - GEMINI FLASH 2.5 INTEGRATION**
+        **ATUALIZADO - GEMINI FLASH 2.5 TIMELINE FORMAT**
 
-        Processa metadados do vídeo usando análise completa do Gemini Flash 2.5
+        Processa metadados do vídeo usando descrição timeline do Gemini Flash 2.5
 
         Args:
             title: Título do vídeo
             description: Descrição do vídeo
             hashtags: Lista de hashtags
             top_comments: Lista de comentários top [{text, likes, author}]
-            gemini_analysis: Dict completo retornado pelo Gemini:
-                - transcript: Transcrição completa (áudio + legendas)
-                - visual_analysis: Análise visual detalhada
-                - editing_techniques: Lista de técnicas de edição
-                - storytelling: Estrutura narrativa
-                - is_fooh: Boolean (True se FOOH detected)
-                - technical_quality: "high" | "medium" | "low"
+            gemini_analysis: Dict retornado pelo Gemini (formato novo):
+                - transcript: Descrição timeline objetiva do vídeo
+                - visual_analysis: Mesmo conteúdo (compatibilidade)
                 - language: Idioma detectado
                 - confidence: 0.0-1.0
-            user_context: Contexto manual do usuário (opcional - peso máximo 40%)
+            user_context: Contexto manual do usuário (opcional - peso máximo)
 
         Returns:
             Dict com auto_description, auto_tags, auto_categories, relevance_score
@@ -488,7 +428,7 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
             return None
 
         try:
-            logger.info(f"🤖 Processando metadados com Gemini analysis (novo método)...")
+            logger.info(f"🤖 Processando metadados com Gemini timeline...")
 
             # Preparar dados
             hashtags_str = ", ".join(hashtags) if hashtags else "Nenhuma"
@@ -501,134 +441,21 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
             else:
                 comments_str = "Nenhum"
 
-            # Extrair dados do Gemini
-            gemini_transcript = gemini_analysis.get('transcript', '') if gemini_analysis else ''
-            gemini_visual = gemini_analysis.get('visual_analysis', '') if gemini_analysis else ''
-            gemini_editing = gemini_analysis.get('editing_techniques', []) if gemini_analysis else []
-            gemini_storytelling = gemini_analysis.get('storytelling', '') if gemini_analysis else ''
-            gemini_is_fooh = gemini_analysis.get('is_fooh', False) if gemini_analysis else False
-            gemini_quality = gemini_analysis.get('technical_quality', 'medium') if gemini_analysis else 'medium'
+            # Extrair descrição timeline do Gemini (formato novo - texto livre)
+            gemini_timeline = gemini_analysis.get('visual_analysis', '') if gemini_analysis else ''
 
-            # Formatar técnicas de edição
-            editing_str = ", ".join(gemini_editing) if gemini_editing else "Nenhuma detectada"
-
-            # Montar prompt enriquecido com análise do Gemini
-            prompt = f"""Você é um especialista em análise de vídeos de referência para marketing e publicidade.
-
-Analise os metadados abaixo e gere tags/categorias automaticamente.
-
-📊 METADADOS DO VÍDEO:
-
-**Título**: {title}
-**Descrição**: {description if description else "Nenhuma"}
-**Hashtags**: {hashtags_str}
-**Comentários Relevantes**: {comments_str}
-
-🎬 ANÁLISE MULTIMODAL (GEMINI FLASH 2.5):
-
-**Transcrição Completa** (áudio + legendas + texto na tela):
-{gemini_transcript if gemini_transcript else "Não disponível"}
-
-**Análise Visual Detalhada**:
-{gemini_visual if gemini_visual else "Não disponível"}
-
-**Técnicas de Edição Detectadas**:
-{editing_str}
-
-**Storytelling / Estrutura Narrativa**:
-{gemini_storytelling if gemini_storytelling else "Não detectado"}
-
-**Qualidade Técnica**: {gemini_quality}
-
-**FOOH Detectado**: {"✅ SIM - Este é um vídeo FOOH (Fake Out-Of-Home / CGI Advertising)" if gemini_is_fooh else "❌ NÃO - Este NÃO é um FOOH"}"""
-
-            # Se usuário forneceu contexto, adicionar com peso MÁXIMO
-            if user_context:
-                prompt += f"""
-
-🎯 CONTEXTO DO USUÁRIO (PESO MÁXIMO - 40%):
-"{user_context}"
-
-⚠️ PRIORIZE o contexto do usuário acima de tudo! Ele sabe POR QUE está salvando este vídeo."""
-
-            prompt += """
-
-📋 SUA TAREFA:
-
-1. Gere uma **auto_description** concisa (1-2 frases) do QUE É o vídeo
-2. Gere 5 **auto_tags** técnicas específicas (ex: color grading, jump cut, FOOH, storytelling)
-3. Sugira 1-3 **auto_categories** (ex: Técnica de Edição, FOOH / CGI Advertising, Storytelling)
-4. Dê um **relevance_score** de 0.0-1.0 (quão útil é como referência)
-
-⚠️ REGRAS IMPORTANTES:
-
-- Se Gemini detectou **is_fooh = TRUE**, SEMPRE inclua "FOOH / CGI Advertising" nas categorias
-- Se Gemini detectou técnicas de edição específicas, crie tags pra elas (ex: jump-cut, speed-ramp)
-- Se transcrição menciona termos técnicos (CGI, VFX, 3D), adicione tags relacionadas
-- Se análise visual descreve estilo específico (minimalista, maximalista), adicione tag
-- **CONTEXTO DO USUÁRIO** tem peso máximo (40%) - priorize o que ELE quer aprender
-
-HIERARQUIA DE CONFIANÇA:
-1️⃣ Contexto do usuário = 40% (se fornecido)
-2️⃣ Análise Visual (Gemini) = 30%
-3️⃣ Transcrição (Gemini) = 20%
-4️⃣ Título + Descrição = 15%
-5️⃣ Hashtags = 10%
-6️⃣ Comentários = 5%
-
-CATEGORIAS PADRÕES (sugira 1-3 mais relevantes):
-- Técnica de Edição
-- Referência Visual
-- Ideia de Conteúdo
-- Áudio/Música
-- Ferramenta/Software
-- Mecânica de Campanha
-- Storytelling
-- Tutorial
-- Case de Sucesso
-- FOOH / CGI Advertising
-- Outro
-
-RETORNE APENAS JSON (sem markdown, sem explicações):
-{{
-  "auto_description": "string",
-  "auto_tags": ["tag1", "tag2", "tag3", "tag4", "tag5"],
-  "auto_categories": ["categoria1", "categoria2"],
-  "confidence": "high|medium|low",
-  "relevance_score": 0.0-1.0
-}}"""
-
-            # Chamar Claude via Replicate
-            output = self.client.run(
-                "anthropic/claude-3.5-sonnet",
-                input={
-                    "prompt": prompt,
-                    "max_tokens": 1024,
-                    "temperature": 0.2,
-                    "top_p": 0.9
-                }
+            # Usar método process_metadata_auto (que já foi atualizado)
+            # passando a descrição do Gemini como visual_analysis
+            return await self.process_metadata_auto(
+                title=title,
+                description=description,
+                hashtags=hashtags,
+                top_comments=top_comments,
+                video_transcript="",  # Gemini já inclui áudio na timeline
+                visual_analysis=gemini_timeline,
+                user_context=user_context
             )
 
-            # Extrair resposta
-            response_text = ""
-            for chunk in output:
-                response_text += chunk
-
-            logger.debug(f"Resposta Claude (Gemini integration): {response_text}")
-
-            # Parse JSON
-            result = json.loads(response_text)
-
-            # Adicionar comentários filtrados
-            result['filtered_comments'] = filtered_comments_list
-
-            logger.info(f"✅ Processamento com Gemini concluído: {len(result.get('auto_tags', []))} tags, FOOH: {gemini_is_fooh}")
-            return result
-
-        except json.JSONDecodeError as e:
-            logger.error(f"❌ Erro ao parsear JSON da resposta Claude (Gemini): {str(e)}")
-            logger.error(f"Resposta raw: {response_text}")
-            return None
         except Exception as e:
             logger.error(f"❌ Erro ao processar metadados com Gemini: {str(e)}")
             return None
