@@ -195,12 +195,29 @@ class ApifyService:
 
                 top_comments = []
                 if "items" in comments_data:
+                    # Extrair comentários da resposta
+                    comments_list = []
                     for item in comments_data["items"]:
                         comment_snippet = item["snippet"]["topLevelComment"]["snippet"]
+                        comments_list.append({
+                            "text": comment_snippet["textDisplay"],
+                            "author": comment_snippet["authorDisplayName"],
+                            "likes": comment_snippet.get("likeCount", 0)
+                        })
+
+                    # Ordenar por likes (garantir que os mais relevantes vêm primeiro)
+                    sorted_comments = sorted(
+                        comments_list,
+                        key=lambda x: x.get("likes", 0),
+                        reverse=True
+                    )
+
+                    # Converter para objetos Comment
+                    for comment in sorted_comments:
                         top_comments.append(Comment(
-                            text=comment_snippet["textDisplay"],
-                            author=comment_snippet["authorDisplayName"],
-                            likes=comment_snippet.get("likeCount", 0)
+                            text=comment["text"],
+                            author=comment["author"],
+                            likes=comment["likes"]
                         ))
 
                 # Extrair hashtags da descrição
@@ -258,10 +275,24 @@ class ApifyService:
             # Tenta com todos os tokens disponíveis até conseguir
             data = await self._try_all_clients(run_tiktok_scraper, "extract_tiktok")
 
-            # Extrair comentários se disponíveis (aumentado para 200)
+            # Extrair comentários se disponíveis (ordenados por likes)
             top_comments = []
             if "comments" in data and data["comments"]:
-                for comment in data["comments"][:200]:
+                # Converter para lista e ordenar por likes (comentários mais relevantes primeiro)
+                comments_list = [
+                    c for c in data["comments"][:200]
+                    if c.get("text")  # Só comentários com texto
+                ]
+
+                # Ordenar por diggCount (likes no TikTok)
+                sorted_comments = sorted(
+                    comments_list,
+                    key=lambda x: x.get("diggCount", 0),
+                    reverse=True
+                )
+
+                # Pegar top 50 comentários com mais likes
+                for comment in sorted_comments[:50]:
                     top_comments.append(Comment(
                         text=comment.get("text", ""),
                         author=comment.get("author", ""),
@@ -344,17 +375,30 @@ class ApifyService:
                 print("⚠️ Instagram scraper retornou dados incompletos - usando fallback")
                 return await self._instagram_fallback(url)
 
-            # Extrair comentários se disponíveis (aumentado para 200, com proteção)
+            # Extrair comentários se disponíveis (ordenados por likes)
             top_comments = []
             try:
                 if "latestComments" in data and data["latestComments"]:
-                    for comment in data["latestComments"][:200]:
-                        if comment.get("text"):  # Valida que tem texto
-                            top_comments.append(Comment(
-                                text=comment.get("text", ""),
-                                author=comment.get("ownerUsername", ""),
-                                likes=comment.get("likesCount", 0)
-                            ))
+                    # Converter para lista e ordenar por likes (comentários mais relevantes primeiro)
+                    comments_list = [
+                        c for c in data["latestComments"][:200]
+                        if c.get("text")  # Só comentários com texto
+                    ]
+
+                    # Ordenar por likesCount (descendente)
+                    sorted_comments = sorted(
+                        comments_list,
+                        key=lambda x: x.get("likesCount", 0),
+                        reverse=True
+                    )
+
+                    # Pegar top 50 comentários com mais likes
+                    for comment in sorted_comments[:50]:
+                        top_comments.append(Comment(
+                            text=comment.get("text", ""),
+                            author=comment.get("ownerUsername", ""),
+                            likes=comment.get("likesCount", 0)
+                        ))
             except Exception:
                 pass  # Ignora erros em comentários
 
