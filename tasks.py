@@ -10,6 +10,7 @@ import os
 import tempfile
 from datetime import datetime
 import asyncio
+import time
 from dotenv import load_dotenv
 
 # Carregar env vars
@@ -23,6 +24,40 @@ from services.thumbnail_service import ThumbnailService
 from supabase import create_client, Client
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# HELPER: Logging com timing
+# ============================================================================
+
+class TaskTimer:
+    """Helper para medir duração de tasks e criar logs consolidados"""
+
+    def __init__(self, task_name: str, bookmark_id: str):
+        self.task_name = task_name
+        self.bookmark_id = bookmark_id
+        self.start_time = None
+
+    def start(self):
+        """Inicia timer e loga início da task"""
+        self.start_time = time.time()
+        logger.info(f"📊 [{self.task_name}] {self.bookmark_id} - INÍCIO")
+
+    def success(self, **details):
+        """Loga sucesso com duração e detalhes"""
+        elapsed = time.time() - self.start_time if self.start_time else 0
+        details_str = " | ".join([f"{k}: {v}" for k, v in details.items()])
+        logger.info(
+            f"✅ [{self.task_name}] {self.bookmark_id} - SUCESSO | "
+            f"{details_str} | {elapsed:.1f}s"
+        )
+
+    def error(self, error_msg: str):
+        """Loga erro com duração"""
+        elapsed = time.time() - self.start_time if self.start_time else 0
+        logger.error(
+            f"❌ [{self.task_name}] {self.bookmark_id} - ERRO | "
+            f"{error_msg} | {elapsed:.1f}s"
+        )
 
 # Inicializar services
 apify_service = ApifyService()
@@ -71,7 +106,9 @@ def process_bookmark_complete_task(
     Returns:
         dict: Resultado final do processamento
     """
-    logger.info(f"🚀 Iniciando processamento completo - Bookmark: {bookmark_id}")
+    # Extrair domínio da URL para log
+    url_domain = url.split('/')[2] if '/' in url else url[:30]
+    logger.info(f"🚀 [PIPELINE] {bookmark_id} - INÍCIO | URL: {url_domain}")
 
     # Atualizar status no Supabase: queued → processing
     update_bookmark_status(bookmark_id, "processing", self.request.id)
@@ -115,7 +152,21 @@ def process_bookmark_complete_task(
                 user_id
             ).apply_async()
 
-        logger.info(f"✅ Pipeline criado - Bookmark: {bookmark_id}, Job: {self.request.id}")
+        # Log estruturado do pipeline
+        pipeline_config = []
+        if extract_metadata:
+            pipeline_config.append("Metadata:✓")
+        if analyze_video:
+            pipeline_config.append("Gemini:✓")
+        if process_ai:
+            pipeline_config.append("Claude:✓")
+        if upload_to_cloud:
+            pipeline_config.append("Upload:✓")
+
+        logger.info(
+            f"✅ [PIPELINE] {bookmark_id} - CRIADO | "
+            f"{' '.join(pipeline_config)} | Job: {self.request.id[:8]}"
+        )
 
         return {
             "success": True,
@@ -125,7 +176,7 @@ def process_bookmark_complete_task(
         }
 
     except Exception as e:
-        logger.error(f"❌ Erro no processamento - Bookmark: {bookmark_id}, Erro: {str(e)}")
+        logger.error(f"❌ [PIPELINE] {bookmark_id} - ERRO | {str(e)[:100]}")
         update_bookmark_status(bookmark_id, "failed", self.request.id, str(e))
         raise
 
@@ -142,25 +193,21 @@ def extract_metadata_task(self, bookmark_id: str, url: str, user_id: str):
     - Upload de thumbnail pra Supabase Storage
     - Salvar metadados no database
     """
-    logger.info(f"📊 Extraindo metadados - Bookmark: {bookmark_id}, URL: {url[:50]}...")
+    timer = TaskTimer("METADATA", bookmark_id)
+    timer.start()
 
     try:
         # 1. Extrair metadados com Apify
-        logger.info("🔍 Chamando Apify para extração de metadados...")
-
-        # Apify service é async, precisa rodar com asyncio
+        logger.debug(f"Chamando Apify para URL: {url[:60]}")
         loop = asyncio.get_event_loop()
         metadata = loop.run_until_complete(apify_service.extract_metadata(url))
 
         if not metadata:
             raise Exception("Apify retornou None - falha na extração de metadados")
 
-        logger.info(f"✅ Metadados extraídos: {metadata.title[:50]}...")
-
         # 2. Upload de thumbnail pra Supabase Storage
         cloud_thumbnail_url = None
         if metadata.thumbnail_url and thumbnail_service:
-            logger.info("📸 Fazendo upload de thumbnail para Supabase Storage...")
             try:
                 cloud_thumbnail_url = loop.run_until_complete(
                     thumbnail_service.upload_thumbnail(
@@ -169,16 +216,10 @@ def extract_metadata_task(self, bookmark_id: str, url: str, user_id: str):
                         bookmark_id
                     )
                 )
-                if cloud_thumbnail_url:
-                    logger.info(f"✅ Thumbnail uploaded: {cloud_thumbnail_url[:80]}...")
-                else:
-                    logger.warning("⚠️ Falha no upload de thumbnail (não bloqueante)")
             except Exception as e:
-                logger.warning(f"⚠️ Erro no upload de thumbnail (não bloqueante): {str(e)}")
+                logger.warning(f"⚠️ Thumbnail upload falhou (não crítico): {str(e)[:50]}")
 
         # 3. Salvar metadados no Supabase
-        logger.info("💾 Salvando metadados no Supabase...")
-
         update_data = {
             'title': metadata.title,
             'original_title': metadata.title,  # Imutável
@@ -198,7 +239,12 @@ def extract_metadata_task(self, bookmark_id: str, url: str, user_id: str):
         # Update no database
         supabase_client.table('bookmarks').update(update_data).eq('id', bookmark_id).execute()
 
-        logger.info(f"✅ Metadados salvos no Supabase - Bookmark: {bookmark_id}")
+        # Log consolidado de sucesso
+        timer.success(
+            Título=metadata.title[:30] if metadata.title else "N/A",
+            Thumb="✓" if cloud_thumbnail_url else "✗",
+            Platform=update_data['platform']
+        )
 
         # 4. Retornar dados para próxima task
         return {
@@ -221,13 +267,14 @@ def extract_metadata_task(self, bookmark_id: str, url: str, user_id: str):
         }
 
     except Exception as e:
-        logger.error(f"❌ Erro ao extrair metadados - Bookmark: {bookmark_id}, Erro: {str(e)}")
+        timer.error(f"Apify: {str(e)[:60]}")
 
         # Atualizar status no Supabase
         update_bookmark_status(bookmark_id, "failed", self.request.id, f"Erro na extração de metadados: {str(e)}")
 
         # Retry se for erro temporário
         if "timeout" in str(e).lower() or "connection" in str(e).lower():
+            logger.warning(f"⚠️ Retry após 30s (timeout/connection)")
             raise self.retry(exc=e, countdown=30)  # Retry após 30s
 
         raise
@@ -241,24 +288,23 @@ def analyze_video_gemini_task(self, previous_result: dict, bookmark_id: str, url
     - Análise multimodal (áudio + visual + movimento)
     - Salvar transcrição e análise visual no database
     """
-    logger.info(f"🎬 Analisando vídeo com Gemini - Bookmark: {bookmark_id}")
+    timer = TaskTimer("GEMINI", bookmark_id)
+    timer.start()
 
     temp_video_path = None
 
     try:
         # 1. Obter URL do vídeo para análise
-        # Prioridade: cloud_video_url > download temporário via Apify
         video_url_for_analysis = None
         user_context = previous_result.get('user_context', '')
 
         # Verificar se já tem vídeo na cloud
         if 'cloud_video_url' in previous_result and previous_result['cloud_video_url']:
             video_url_for_analysis = previous_result['cloud_video_url']
-            logger.info(f"📹 Usando vídeo da cloud: {video_url_for_analysis[:80]}...")
+            logger.debug(f"Usando vídeo da cloud: {video_url_for_analysis[:60]}")
         else:
             # Baixar vídeo temporariamente via Apify
-            logger.info("⬇️ Baixando vídeo temporariamente para análise...")
-
+            logger.debug("Baixando vídeo temporário via Apify")
             loop = asyncio.get_event_loop()
 
             # Detectar plataforma
@@ -267,7 +313,6 @@ def analyze_video_gemini_task(self, previous_result: dict, bookmark_id: str, url
 
             # Extrair URL direta do vídeo
             if platform == Platform.YOUTUBE:
-                # YouTube precisa de extração via Apify
                 video_data = loop.run_until_complete(
                     apify_service.extract_video_download_url_youtube(url, quality="720p")
                 )
@@ -280,30 +325,23 @@ def analyze_video_gemini_task(self, previous_result: dict, bookmark_id: str, url
                     apify_service.extract_video_download_url_tiktok(url, quality="720p")
                 )
             else:
-                raise Exception(f"Plataforma não suportada para análise de vídeo: {platform}")
+                raise Exception(f"Plataforma não suportada: {platform}")
 
             if not video_data or not video_data.get('download_url'):
                 raise Exception("Falha ao extrair URL do vídeo")
 
             video_url_for_analysis = video_data['download_url']
-            logger.info(f"✅ URL do vídeo obtida: {video_url_for_analysis[:80]}...")
 
         # 2. Analisar vídeo com Gemini Flash 2.5
-        logger.info("🤖 Chamando Gemini Flash 2.5 para análise multimodal...")
-
         loop = asyncio.get_event_loop()
         gemini_analysis = loop.run_until_complete(
             gemini_service.analyze_video(video_url_for_analysis, user_context)
         )
 
         if not gemini_analysis:
-            raise Exception("Gemini retornou None - falha na análise de vídeo")
-
-        logger.info(f"✅ Análise Gemini concluída - Idioma: {gemini_analysis.get('language')}, FOOH: {gemini_analysis.get('is_fooh')}")
+            raise Exception("Gemini retornou None")
 
         # 3. Salvar análise no Supabase
-        logger.info("💾 Salvando análise Gemini no Supabase...")
-
         update_data = {
             'video_transcript': gemini_analysis.get('transcript', ''),
             'visual_analysis': gemini_analysis.get('visual_analysis', ''),
@@ -313,7 +351,12 @@ def analyze_video_gemini_task(self, previous_result: dict, bookmark_id: str, url
 
         supabase_client.table('bookmarks').update(update_data).eq('id', bookmark_id).execute()
 
-        logger.info(f"✅ Análise Gemini salva no Supabase - Bookmark: {bookmark_id}")
+        # Log consolidado de sucesso
+        timer.success(
+            Idioma=gemini_analysis.get('language', 'N/A'),
+            FOOH="Sim" if gemini_analysis.get('is_fooh') else "Não",
+            Transcript=f"{len(gemini_analysis.get('transcript', ''))} chars"
+        )
 
         # 4. Retornar dados para próxima task
         return {
@@ -328,13 +371,14 @@ def analyze_video_gemini_task(self, previous_result: dict, bookmark_id: str, url
         }
 
     except Exception as e:
-        logger.error(f"❌ Erro ao analisar vídeo com Gemini - Bookmark: {bookmark_id}, Erro: {str(e)}")
+        timer.error(f"Gemini: {str(e)[:60]}")
 
         # Atualizar status no Supabase
         update_bookmark_status(bookmark_id, "failed", self.request.id, f"Erro na análise Gemini: {str(e)}")
 
         # Retry se for erro temporário
         if "timeout" in str(e).lower() or "rate limit" in str(e).lower():
+            logger.warning(f"⚠️ Retry após 60s (timeout/rate limit)")
             raise self.retry(exc=e, countdown=60)  # Retry após 60s
 
         raise
@@ -344,7 +388,7 @@ def analyze_video_gemini_task(self, previous_result: dict, bookmark_id: str, url
         if temp_video_path and os.path.exists(temp_video_path):
             try:
                 os.unlink(temp_video_path)
-                logger.info(f"🗑️ Vídeo temporário deletado: {temp_video_path}")
+                logger.debug(f"Vídeo temporário deletado: {temp_video_path}")
             except:
                 pass
 
@@ -357,7 +401,8 @@ def process_claude_task(self, previous_result: dict, bookmark_id: str, user_id: 
     - Gerar tags, categorias, descrição automática
     - Salvar no database
     """
-    logger.info(f"🤖 Processando com Claude - Bookmark: {bookmark_id}")
+    timer = TaskTimer("CLAUDE", bookmark_id)
+    timer.start()
 
     try:
         # 1. Extrair dados do previous_result
@@ -369,13 +414,11 @@ def process_claude_task(self, previous_result: dict, bookmark_id: str, user_id: 
         user_context = previous_result.get('user_context', '')
 
         if not title:
-            raise Exception("Título não disponível para processamento Claude")
+            raise Exception("Título não disponível")
 
-        logger.info(f"📝 Dados recebidos: título={title[:50]}, Gemini={'SIM' if gemini_analysis else 'NÃO'}, user_context={'SIM' if user_context else 'NÃO'}")
+        logger.debug(f"Dados: título={title[:30]}, Gemini={'✓' if gemini_analysis else '✗'}, user_context={'✓' if user_context else '✗'}")
 
-        # 2. Chamar Claude com análise do Gemini
-        logger.info("🧠 Chamando Claude para processamento final...")
-
+        # 2. Chamar Claude
         loop = asyncio.get_event_loop()
 
         # Se tem análise Gemini, usar novo método
@@ -392,7 +435,7 @@ def process_claude_task(self, previous_result: dict, bookmark_id: str, user_id: 
             )
         else:
             # Fallback: usar método antigo (sem análise de vídeo)
-            logger.warning("⚠️ Sem análise Gemini - usando método fallback")
+            logger.warning("⚠️ Sem análise Gemini - usando fallback")
             result = loop.run_until_complete(
                 claude_service.process_metadata_auto(
                     title=title,
@@ -404,12 +447,9 @@ def process_claude_task(self, previous_result: dict, bookmark_id: str, user_id: 
             )
 
         if not result:
-            raise Exception("Claude retornou None - falha no processamento")
-
-        logger.info(f"✅ Claude processou: {len(result.get('auto_tags', []))} tags, {len(result.get('auto_categories', []))} categorias")
+            raise Exception("Claude retornou None")
 
         # 3. Salvar no Supabase
-        logger.info("💾 Salvando dados do Claude no Supabase...")
 
         update_data = {
             'auto_description': result.get('auto_description', ''),
@@ -433,7 +473,12 @@ def process_claude_task(self, previous_result: dict, bookmark_id: str, user_id: 
 
         supabase_client.table('bookmarks').update(update_data).eq('id', bookmark_id).execute()
 
-        logger.info(f"✅ Dados Claude salvos no Supabase - Bookmark: {bookmark_id}")
+        # Log consolidado de sucesso
+        timer.success(
+            Tags=len(result.get('auto_tags', [])),
+            Categorias=len(result.get('auto_categories', [])),
+            Relevância=f"{result.get('relevance_score', 0):.2f}"
+        )
 
         # 4. Retornar dados para próxima task
         return {
@@ -446,13 +491,14 @@ def process_claude_task(self, previous_result: dict, bookmark_id: str, user_id: 
         }
 
     except Exception as e:
-        logger.error(f"❌ Erro ao processar com Claude - Bookmark: {bookmark_id}, Erro: {str(e)}")
+        timer.error(f"Claude: {str(e)[:60]}")
 
         # Atualizar status no Supabase
         update_bookmark_status(bookmark_id, "failed", self.request.id, f"Erro no processamento Claude: {str(e)}")
 
         # Retry se for erro temporário
         if "timeout" in str(e).lower() or "rate limit" in str(e).lower():
+            logger.warning(f"⚠️ Retry após 45s (timeout/rate limit)")
             raise self.retry(exc=e, countdown=45)  # Retry após 45s
 
         raise
@@ -620,18 +666,30 @@ def cleanup_and_notify_task(self, previous_result: dict, bookmark_id: str, user_
                     pass
 
         # 2. Atualizar status final no Supabase
-        logger.info("✅ Atualizando status final: completed")
         update_bookmark_status(bookmark_id, "completed", self.request.id, error_message=None)
 
-        # 3. (Opcional) Enviar notificação push
-        # TODO: Implementar quando tiver Firebase Cloud Messaging
-        # push_notification_service.send_notification(
-        #     user_id=user_id,
-        #     title="Vídeo processado!",
-        #     body=f"Seu bookmark foi processado com sucesso."
-        # )
+        # 3. LOG RESUMO FINAL (uma linha com tudo)
+        pipeline_summary = []
+        if previous_result.get('metadata_extracted'):
+            pipeline_summary.append("Metadata:✓")
+        if previous_result.get('video_analyzed'):
+            pipeline_summary.append("Gemini:✓")
+        if previous_result.get('ai_processed'):
+            pipeline_summary.append("Claude:✓")
+        if previous_result.get('cloud_uploaded'):
+            pipeline_summary.append("Upload:✓")
 
-        logger.info(f"✅ Processamento completo! - Bookmark: {bookmark_id}")
+        tags_count = len(previous_result.get('auto_tags', []))
+        cats_count = len(previous_result.get('auto_categories', []))
+
+        logger.info(
+            f"🎉 [PIPELINE] {bookmark_id} - COMPLETO | "
+            f"{' '.join(pipeline_summary)} | "
+            f"Tags: {tags_count} | Categorias: {cats_count}"
+        )
+
+        # 4. (Opcional) Enviar notificação push
+        # TODO: Implementar quando tiver Firebase Cloud Messaging
 
         return {
             **previous_result,
