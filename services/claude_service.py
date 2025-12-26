@@ -82,12 +82,13 @@ class ClaudeService:
             output = self.client.run(
                 self.model_version,
                 input={
+                    "images": [],  # Explicitamente incluir (mesmo vazio)
+                    "max_output_tokens": 65535,  # Limite máximo (teste manual bem-sucedido)
                     "prompt": prompt,
-                    "max_output_tokens": 1024,  # Gemini 3 usa max_output_tokens
-                    "temperature": 1.0,  # Gemini 3: recomenda manter em 1.0 (default)
+                    "temperature": 1,  # Gemini 3: recomenda manter em 1.0 (default)
+                    "thinking_level": "high",  # Máximo raciocínio (específico Gemini 3)
                     "top_p": 0.95,  # Gemini 3 default
-                    # NOTA: top_k NÃO existe no Gemini 3 Pro (removido)
-                    "thinking_level": "high"  # Máximo raciocínio (específico Gemini 3)
+                    "videos": []  # Explicitamente incluir (mesmo vazio)
                 }
             )
 
@@ -259,17 +260,18 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
 
             # Chamar Gemini 3 Pro via Replicate
             logger.info(f"🔮 Chamando Gemini 3 Pro (auto) com thinking_level=high...")
-            logger.debug(f"🔮 DEBUG - Input parameters: max_output_tokens=1024, temperature=1.0, top_p=0.95, thinking_level=high")
+            logger.debug(f"🔮 DEBUG - Input parameters: max_output_tokens=65535, temperature=1, top_p=0.95, thinking_level=high, images=[], videos=[]")
 
             output = self.client.run(
                 self.model_version,
                 input={
+                    "images": [],  # Explicitamente incluir (mesmo vazio)
+                    "max_output_tokens": 65535,  # Limite máximo (teste manual bem-sucedido)
                     "prompt": prompt,
-                    "max_output_tokens": 1024,  # Gemini 3 usa max_output_tokens
-                    "temperature": 1.0,  # Gemini 3: recomenda manter em 1.0 (default)
+                    "temperature": 1,  # Gemini 3: recomenda manter em 1.0 (default)
+                    "thinking_level": "high",  # Máximo raciocínio (específico Gemini 3)
                     "top_p": 0.95,  # Gemini 3 default
-                    # NOTA: top_k NÃO existe no Gemini 3 Pro (removido)
-                    "thinking_level": "high"  # Máximo raciocínio (específico Gemini 3)
+                    "videos": []  # Explicitamente incluir (mesmo vazio)
                 }
             )
 
