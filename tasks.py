@@ -89,8 +89,8 @@ def process_bookmark_complete_task(
 
     Executa em cadeia (chain):
     1. Extrai metadados (Apify)
-    2. Analisa vídeo com Gemini (se upload_to_cloud=True)
-    3. Processa com Claude (tags, categorias, descrição)
+    2. Analisa vídeo com Gemini 2.5 Flash (se upload_to_cloud=True)
+    3. Processa com Gemini 3.0 Pro (tags, categorias, descrição)
     4. Upload pra cloud (se upload_to_cloud=True)
     5. Cleanup e notificação
 
@@ -99,8 +99,8 @@ def process_bookmark_complete_task(
         url: URL do vídeo (YouTube/Instagram/TikTok)
         user_id: UUID do usuário
         extract_metadata: Extrair metadados (título, descrição, etc)
-        analyze_video: Analisar vídeo com Gemini (áudio + visual)
-        process_ai: Processar com Claude (tags/categorias)
+        analyze_video: Analisar vídeo com Gemini 2.5 Flash (áudio + visual)
+        process_ai: Processar com Gemini 3.0 Pro (tags/categorias)
         upload_to_cloud: Fazer upload do vídeo pra Supabase Storage
 
     Returns:
@@ -130,7 +130,7 @@ def process_bookmark_complete_task(
                 # .s() cria signature parcial - primeiro arg vem da task anterior
                 workflow |= analyze_video_gemini_task.s(bookmark_id, url)
 
-            # 3. Processamento Claude (recebe resultado anterior)
+            # 3. Processamento Gemini 3.0 Pro (recebe resultado anterior)
             if process_ai:
                 workflow |= process_claude_task.s(bookmark_id, user_id)
 
@@ -159,7 +159,7 @@ def process_bookmark_complete_task(
         if analyze_video:
             pipeline_config.append("Gemini:✓")
         if process_ai:
-            pipeline_config.append("Claude:✓")
+            pipeline_config.append("Gemini Pro:✓")
         if upload_to_cloud:
             pipeline_config.append("Upload:✓")
 
@@ -396,12 +396,12 @@ def analyze_video_gemini_task(self, previous_result: dict, bookmark_id: str, url
 @celery_app.task(bind=True, name="tasks.process_claude_task", max_retries=2, time_limit=300)
 def process_claude_task(self, previous_result: dict, bookmark_id: str, user_id: str):
     """
-    FASE 3.3: Processar com Claude
-    - Juntar metadados + análise Gemini + contexto do usuário
+    FASE 3.3: Processar com Gemini 3.0 Pro
+    - Juntar metadados + análise Gemini 2.5 Flash + contexto do usuário
     - Gerar tags, categorias, descrição automática
     - Salvar no database
     """
-    timer = TaskTimer("CLAUDE", bookmark_id)
+    timer = TaskTimer("GEMINI_PRO", bookmark_id)
     timer.start()
 
     try:
@@ -418,7 +418,7 @@ def process_claude_task(self, previous_result: dict, bookmark_id: str, user_id: 
 
         logger.debug(f"Dados: título={title[:30]}, Gemini={'✓' if gemini_analysis else '✗'}, user_context={'✓' if user_context else '✗'}")
 
-        # 2. Chamar Claude
+        # 2. Chamar Gemini 3.0 Pro
         loop = asyncio.get_event_loop()
 
         # Se tem análise Gemini, usar novo método
@@ -447,7 +447,7 @@ def process_claude_task(self, previous_result: dict, bookmark_id: str, user_id: 
             )
 
         if not result:
-            raise Exception("Claude retornou None")
+            raise Exception("Gemini Pro retornou None")
 
         # 3. Salvar no Supabase
 
@@ -491,10 +491,10 @@ def process_claude_task(self, previous_result: dict, bookmark_id: str, user_id: 
         }
 
     except Exception as e:
-        timer.error(f"Claude: {str(e)[:60]}")
+        timer.error(f"Gemini Pro: {str(e)[:60]}")
 
         # Atualizar status no Supabase
-        update_bookmark_status(bookmark_id, "failed", self.request.id, f"Erro no processamento Claude: {str(e)}")
+        update_bookmark_status(bookmark_id, "failed", self.request.id, f"Erro no processamento Gemini Pro: {str(e)}")
 
         # Retry se for erro temporário
         if "timeout" in str(e).lower() or "rate limit" in str(e).lower():
@@ -675,7 +675,7 @@ def cleanup_and_notify_task(self, previous_result: dict, bookmark_id: str, user_
         if previous_result.get('video_analyzed'):
             pipeline_summary.append("Gemini:✓")
         if previous_result.get('ai_processed'):
-            pipeline_summary.append("Claude:✓")
+            pipeline_summary.append("Gemini Pro:✓")
         if previous_result.get('cloud_uploaded'):
             pipeline_summary.append("Upload:✓")
 
