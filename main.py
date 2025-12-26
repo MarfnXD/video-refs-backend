@@ -4,7 +4,7 @@ import os
 # IMPORTANTE: Carregar .env ANTES de importar os serviços
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException, File, UploadFile, Form
+from fastapi import FastAPI, HTTPException, File, UploadFile, Form, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
@@ -20,8 +20,8 @@ from services.thumbnail_service import ThumbnailService
 from services.video_analysis_service import video_analysis_service
 from supabase import create_client, Client
 
-# Celery tasks (job queue)
-from tasks import process_bookmark_complete_task
+# Background processor (FastAPI Background Tasks - substitui Celery)
+from background_processor import process_bookmark_background
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -1178,24 +1178,25 @@ class ProcessBookmarkCompleteResponse(BaseModel):
 
 
 @app.post("/api/process-bookmark-complete", response_model=ProcessBookmarkCompleteResponse)
-async def process_bookmark_complete(request: ProcessBookmarkCompleteRequest):
+async def process_bookmark_complete(
+    request: ProcessBookmarkCompleteRequest,
+    background_tasks: BackgroundTasks
+):
     """
-    **NOVO ENDPOINT - PROCESSAMENTO 100% EM BACKGROUND**
+    **PROCESSAMENTO 100% EM BACKGROUND (FastAPI Background Tasks)**
 
-    Enfileira bookmark para processamento completo assíncrono.
-    Celular só envia requisição e desconecta - backend processa TUDO em background.
+    Phone envia requisição e desconecta - backend processa TUDO em background.
 
     **Fluxo:**
     1. Valida requisição
-    2. Cria job na fila (Celery + Redis)
-    3. Retorna job_id IMEDIATAMENTE
-    4. Workers processam em background:
+    2. Adiciona task em background (FastAPI Background Tasks)
+    3. Retorna success IMEDIATAMENTE
+    4. Backend processa em background:
        - Extração de metadados (Apify)
-       - Análise de vídeo (Gemini Flash 2.5)
+       - Análise de vídeo (Gemini Flash 2.5) - OPCIONAL
        - Processamento de IA (Claude)
-       - Upload pra cloud (Supabase Storage)
-       - Cleanup e notificação
-    5. Celular sincroniza via Supabase Realtime
+       - Atualiza Supabase
+    5. Phone sincroniza via Supabase Realtime
 
     **Parâmetros:**
     - bookmark_id: UUID do bookmark (já criado no Supabase)
@@ -1204,20 +1205,20 @@ async def process_bookmark_complete(request: ProcessBookmarkCompleteRequest):
     - extract_metadata: Extrair metadados? (padrão: True)
     - analyze_video: Analisar vídeo com Gemini? (padrão: True)
     - process_ai: Processar com Claude? (padrão: True)
-    - upload_to_cloud: Upload de vídeo pra cloud? (padrão: False - economia de banda)
+    - upload_to_cloud: Upload de vídeo pra cloud? (padrão: False)
     - user_context: Contexto do usuário (opcional, peso 40% na IA)
 
     **Retorna:**
     - success: True/False
-    - job_id: ID do job Celery (para monitoramento)
-    - estimated_time_seconds: Tempo estimado (90-180s)
+    - bookmark_id: UUID do bookmark
+    - estimated_time_seconds: Tempo estimado (60-150s)
 
     **Vantagens:**
-    - ✅ Celular NÃO precisa ficar aberto
-    - ✅ Processamento paralelo (10-20 jobs simultâneos)
-    - ✅ Retry automático se falhar
-    - ✅ Vídeo NÃO trafega pelo celular
-    - ✅ Celular sincroniza automaticamente via Realtime
+    - ✅ Phone NÃO precisa ficar aberto
+    - ✅ Simples (sem Redis/Celery)
+    - ✅ Processa 2-3 vídeos simultâneos
+    - ✅ Phone sincroniza automaticamente via Realtime
+    - ✅ Grátis (sem custo extra)
     """
     try:
         logger.info(f"🚀 Nova requisição de processamento - Bookmark: {request.bookmark_id}")
@@ -1237,44 +1238,36 @@ async def process_bookmark_complete(request: ProcessBookmarkCompleteRequest):
             }).eq('id', request.bookmark_id).execute()
         except Exception as e:
             logger.warning(f"⚠️ Erro ao atualizar status inicial (bookmark pode não existir): {str(e)}")
-            # Não bloqueia - task vai criar/atualizar depois
+            # Não bloqueia - background task vai criar/atualizar depois
 
-        # Enfileirar task no Celery
-        task = process_bookmark_complete_task.apply_async(
-            kwargs={
-                'bookmark_id': request.bookmark_id,
-                'url': request.url,
-                'user_id': request.user_id,
-                'extract_metadata': request.extract_metadata,
-                'analyze_video': request.analyze_video,
-                'process_ai': request.process_ai,
-                'upload_to_cloud': request.upload_to_cloud,
-            },
-            # Retry policy
-            retry=True,
-            retry_policy={
-                'max_retries': 3,
-                'interval_start': 5,  # Espera 5s antes do primeiro retry
-                'interval_step': 10,  # Incrementa 10s a cada retry
-                'interval_max': 60,   # Máximo 60s entre retries
-            }
+        # Adicionar task em background (FastAPI Background Tasks)
+        background_tasks.add_task(
+            process_bookmark_background,
+            bookmark_id=request.bookmark_id,
+            url=request.url,
+            user_id=request.user_id,
+            extract_metadata=request.extract_metadata,
+            analyze_video=request.analyze_video,
+            process_ai=request.process_ai,
+            upload_to_cloud=request.upload_to_cloud,
+            user_context=request.user_context
         )
 
         # Estimar tempo de processamento
-        estimated_time = 90  # Base: 90s
+        estimated_time = 60  # Base: 60s
         if request.analyze_video:
             estimated_time += 60  # +60s para Gemini
         if request.upload_to_cloud:
             estimated_time += 30  # +30s para upload
 
-        logger.info(f"✅ Job enfileirado - Bookmark: {request.bookmark_id}, Job ID: {task.id}")
+        logger.info(f"✅ Background task adicionada - Bookmark: {request.bookmark_id}")
 
         return ProcessBookmarkCompleteResponse(
             success=True,
-            job_id=task.id,
+            job_id=request.bookmark_id,  # Usa bookmark_id como job_id (não tem job_id separado)
             bookmark_id=request.bookmark_id,
             estimated_time_seconds=estimated_time,
-            message=f"Bookmark enfileirado para processamento. Tempo estimado: {estimated_time}s"
+            message=f"Bookmark em processamento. Tempo estimado: {estimated_time}s"
         )
 
     except Exception as e:
