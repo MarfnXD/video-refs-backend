@@ -24,7 +24,7 @@ from supabase import create_client, Client
 from background_processor import process_bookmark_background
 
 # Configurar logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)  # DEBUG temporário para diagnosticar fluxo Gemini→Claude
 logger = logging.getLogger(__name__)
 
 app = FastAPI(

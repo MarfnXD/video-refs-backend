@@ -190,6 +190,14 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
         try:
             logger.info(f"🤖 Processando metadados automaticamente com Claude...")
 
+            # DEBUG: Log dos parâmetros recebidos
+            logger.debug(f"📊 Parâmetros recebidos:")
+            logger.debug(f"   title: {len(title)} chars")
+            logger.debug(f"   visual_analysis: {len(visual_analysis)} chars")
+            logger.debug(f"   user_context: {len(user_context)} chars")
+            if visual_analysis:
+                logger.debug(f"   visual_analysis preview: {visual_analysis[:200]}...")
+
             # Preparar dados
             hashtags_str = ", ".join(hashtags) if hashtags else "Nenhuma"
 
@@ -443,6 +451,14 @@ RETORNE APENAS JSON:
         try:
             logger.info(f"🤖 Processando metadados com Gemini timeline...")
 
+            # DEBUG: Log gemini_analysis recebido
+            if gemini_analysis:
+                logger.debug(f"📊 Gemini analysis recebido: {list(gemini_analysis.keys())}")
+                logger.debug(f"   transcript: {len(gemini_analysis.get('transcript', ''))} chars")
+                logger.debug(f"   visual_analysis: {len(gemini_analysis.get('visual_analysis', ''))} chars")
+            else:
+                logger.warning(f"⚠️ gemini_analysis é None!")
+
             # Preparar dados
             hashtags_str = ", ".join(hashtags) if hashtags else "Nenhuma"
 
@@ -456,6 +472,11 @@ RETORNE APENAS JSON:
 
             # Extrair descrição timeline do Gemini (formato novo - texto livre)
             gemini_timeline = gemini_analysis.get('visual_analysis', '') if gemini_analysis else ''
+
+            # DEBUG: Log do timeline extraído
+            logger.debug(f"📝 Timeline extraído: {len(gemini_timeline)} chars")
+            if gemini_timeline:
+                logger.debug(f"   Preview: {gemini_timeline[:200]}...")
 
             # Usar método process_metadata_auto (que já foi atualizado)
             # passando a descrição do Gemini como visual_analysis
