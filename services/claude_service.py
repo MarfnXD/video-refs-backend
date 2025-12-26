@@ -107,9 +107,19 @@ class ClaudeService:
             logger.debug(f"✅ DEBUG - Total de chunks: {chunk_count}, texto final: {len(response_text)} chars")
             logger.debug(f"Resposta Gemini 3 Pro: {response_text[:500]}...")
 
-            # Parse JSON (Claude pode retornar JSON + texto explicativo depois)
-            # Extrair apenas a parte JSON (até o último } que fecha o objeto)
+            # Limpar markdown code blocks se houver (Gemini 3 retorna ```json\n...\n```)
             json_text = response_text.strip()
+            if json_text.startswith("```"):
+                logger.debug("🧹 Removendo markdown code fence do JSON...")
+                lines = json_text.split('\n')
+                # Remover primeira linha (```json ou ```)
+                if lines[0].startswith('```'):
+                    lines = lines[1:]
+                # Remover última linha se for apenas ```
+                if lines and lines[-1].strip() == '```':
+                    lines = lines[:-1]
+                json_text = '\n'.join(lines).strip()
+                logger.debug(f"✅ Markdown removido - JSON limpo: {len(json_text)} chars")
 
             # Se tem texto extra depois do JSON, encontrar onde o JSON termina
             if '\n\n' in json_text:
@@ -290,9 +300,19 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
             logger.debug(f"✅ DEBUG (auto) - Total de chunks: {chunk_count}, texto final: {len(response_text)} chars")
             logger.debug(f"Resposta Gemini 3 Pro (auto): {response_text[:500]}...")
 
-            # Parse JSON (Claude pode retornar JSON + texto explicativo depois)
-            # Extrair apenas a parte JSON (até o último } que fecha o objeto)
+            # Limpar markdown code blocks se houver (Gemini 3 retorna ```json\n...\n```)
             json_text = response_text.strip()
+            if json_text.startswith("```"):
+                logger.debug("🧹 Removendo markdown code fence do JSON...")
+                lines = json_text.split('\n')
+                # Remover primeira linha (```json ou ```)
+                if lines[0].startswith('```'):
+                    lines = lines[1:]
+                # Remover última linha se for apenas ```
+                if lines and lines[-1].strip() == '```':
+                    lines = lines[:-1]
+                json_text = '\n'.join(lines).strip()
+                logger.debug(f"✅ Markdown removido - JSON limpo: {len(json_text)} chars")
 
             # Se tem texto extra depois do JSON, encontrar onde o JSON termina
             if '\n\n' in json_text:
