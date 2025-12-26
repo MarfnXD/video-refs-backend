@@ -1,5 +1,11 @@
 """
-Serviço para processamento de contexto usando Claude 3.5 Sonnet via Replicate
+Serviço para processamento de contexto usando Gemini 3 Pro via Replicate
+
+Gemini 3 Pro (novembro 2025):
+- Modelo mais avançado da Google com raciocínio aprofundado
+- Suporta multimodal (texto, imagens, vídeos, áudio)
+- Thinking level: "high" para máxima qualidade de análise
+- Substituiu Claude 3.5 Sonnet para melhor integração com Gemini 2.5 Flash
 """
 import os
 import json
@@ -17,6 +23,9 @@ class ClaudeService:
             self.client = None
         else:
             self.client = replicate.Client(api_token=api_token)
+
+        # Modelo: Gemini 3 Pro (Google, novembro 2025)
+        self.model_version = "google/gemini-3-pro"
 
     async def process_context(
         self,
@@ -42,7 +51,7 @@ class ClaudeService:
             Dict com contexto processado, tags, categorias e projetos sugeridos
         """
         if not self.client:
-            logger.error("Claude client não inicializado (REPLICATE_API_TOKEN faltando)")
+            logger.error("Gemini 3 Pro client não inicializado (REPLICATE_API_TOKEN faltando)")
             return None
 
         if not user_context_raw or not user_context_raw.strip():
@@ -66,15 +75,16 @@ class ClaudeService:
                 projects_list
             )
 
-            # Chamar Claude via Replicate
-            # https://replicate.com/anthropic/claude-3.5-sonnet
+            # Chamar Gemini 3 Pro via Replicate
+            # https://replicate.com/google/gemini-3-pro
             output = self.client.run(
-                "anthropic/claude-3.5-sonnet",
+                self.model_version,
                 input={
                     "prompt": prompt,
-                    "max_tokens": 1024,
-                    "temperature": 0.3,
-                    "top_p": 0.9
+                    "max_output_tokens": 1024,  # Gemini 3 usa max_output_tokens (não max_tokens)
+                    "temperature": 1.0,  # Gemini 3: recomenda manter em 1.0 (default)
+                    "top_p": 0.95,  # Gemini 3 default
+                    "thinking_level": "high"  # Máximo raciocínio (específico Gemini 3)
                 }
             )
 
@@ -83,7 +93,7 @@ class ClaudeService:
             for chunk in output:
                 response_text += chunk
 
-            logger.debug(f"Resposta Claude: {response_text}")
+            logger.debug(f"Resposta Gemini 3 Pro: {response_text}")
 
             # Parse JSON (Claude pode retornar JSON + texto explicativo depois)
             # Extrair apenas a parte JSON (até o último } que fecha o objeto)
@@ -109,11 +119,11 @@ class ClaudeService:
             return result
 
         except json.JSONDecodeError as e:
-            logger.error(f"❌ Erro ao parsear JSON da resposta Claude: {str(e)}")
+            logger.error(f"❌ Erro ao parsear JSON da resposta Gemini 3 Pro: {str(e)}")
             logger.error(f"Resposta raw: {response_text}")
             return None
         except Exception as e:
-            logger.error(f"❌ Erro ao processar contexto com Claude: {str(e)}")
+            logger.error(f"❌ Erro ao processar contexto com Gemini 3 Pro: {str(e)}")
             return None
 
     def _build_prompt(
@@ -201,11 +211,11 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
             Dict com auto_description, auto_tags, auto_categories
         """
         if not self.client:
-            logger.error("Claude client não inicializado (REPLICATE_API_TOKEN faltando)")
+            logger.error("Gemini 3 Pro client não inicializado (REPLICATE_API_TOKEN faltando)")
             return None
 
         try:
-            logger.info(f"🤖 Processando metadados automaticamente com Claude...")
+            logger.info(f"🤖 Processando metadados automaticamente com Gemini 3 Pro...")
 
             # DEBUG: Log dos parâmetros recebidos
             logger.debug(f"📊 Parâmetros recebidos:")
@@ -232,14 +242,15 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
                 video_transcript, visual_analysis, user_context
             )
 
-            # Chamar Claude via Replicate
+            # Chamar Gemini 3 Pro via Replicate
             output = self.client.run(
-                "anthropic/claude-3.5-sonnet",
+                self.model_version,
                 input={
                     "prompt": prompt,
-                    "max_tokens": 1024,
-                    "temperature": 0.2,  # Mais determinístico para análise automática
-                    "top_p": 0.9
+                    "max_output_tokens": 1024,  # Gemini 3 usa max_output_tokens (não max_tokens)
+                    "temperature": 1.0,  # Gemini 3: recomenda manter em 1.0 (default)
+                    "top_p": 0.95,  # Gemini 3 default
+                    "thinking_level": "high"  # Máximo raciocínio (específico Gemini 3)
                 }
             )
 
@@ -248,7 +259,7 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
             for chunk in output:
                 response_text += chunk
 
-            logger.debug(f"Resposta Claude (auto): {response_text}")
+            logger.debug(f"Resposta Gemini 3 Pro (auto): {response_text}")
 
             # Parse JSON (Claude pode retornar JSON + texto explicativo depois)
             # Extrair apenas a parte JSON (até o último } que fecha o objeto)
@@ -277,7 +288,7 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
             return result
 
         except json.JSONDecodeError as e:
-            logger.error(f"❌ Erro ao parsear JSON da resposta Claude (auto): {str(e)}")
+            logger.error(f"❌ Erro ao parsear JSON da resposta Gemini 3 Pro (auto): {str(e)}")
             logger.error(f"Resposta raw: {response_text}")
             return None
         except Exception as e:
@@ -479,7 +490,7 @@ RETORNE APENAS JSON:
             Dict com auto_description, auto_tags, auto_categories, relevance_score
         """
         if not self.client:
-            logger.error("❌ Claude client não inicializado (REPLICATE_API_TOKEN faltando)")
+            logger.error("❌ Gemini 3 Pro client não inicializado (REPLICATE_API_TOKEN faltando)")
             return None
 
         try:
