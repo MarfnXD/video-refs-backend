@@ -588,6 +588,121 @@ RETORNE APENAS JSON:
             logger.error(f"❌ Erro ao processar metadados com Gemini: {str(e)}")
             return None
 
+    async def generate_smart_title(
+        self,
+        auto_description: str,
+        auto_tags: list,
+        user_context: Optional[str] = None,
+        visual_analysis: Optional[str] = None
+    ) -> Optional[str]:
+        """
+        Gera título otimizado para recuperação de conhecimento (metodologia CODE - Tiago Forte)
+
+        Substitui títulos clickbait por títulos DESCRITIVOS que facilitam busca futura.
+
+        Args:
+            auto_description: Descrição gerada pelo Claude (prioridade ALTA)
+            auto_tags: Top 3-5 tags relevantes
+            user_context: Por que usuário salvou (se disponível)
+            visual_analysis: Timeline/descrição do Gemini (opcional)
+
+        Returns:
+            Título de 60-80 caracteres no formato: [Tema Principal] - [Técnica/Aplicação]
+
+        Exemplos de output:
+            - "Marvel Rivals Cinematic - VFX de partículas e câmera dinâmica"
+            - "Le Petit Chef - Projection mapping em mesa de jantar"
+            - "Tutorial Aspect Ratio - Técnicas de máscara expansível"
+        """
+        if not self.client:
+            logger.warning("Claude client não disponível - retornando None para smart_title")
+            return None
+
+        try:
+            # Limitar tamanho dos inputs para não estourar contexto
+            description_preview = auto_description[:400] if auto_description else ""
+            visual_preview = visual_analysis[:300] if visual_analysis else ""
+            context_preview = user_context[:200] if user_context else ""
+            tags_str = ", ".join(auto_tags[:5]) if auto_tags else ""
+
+            # Prompt otimizado para título descritivo
+            prompt = f"""Gere um título DESCRITIVO de 60-80 caracteres para este vídeo, otimizado para RECUPERAÇÃO futura (não engajamento).
+
+**DADOS DO VÍDEO:**
+
+Descrição automática: {description_preview}
+
+Tags principais: {tags_str}
+"""
+
+            if context_preview:
+                prompt += f"\nPor que foi salvo: {context_preview}\n"
+
+            if visual_preview:
+                prompt += f"\nAnálise visual: {visual_preview}\n"
+
+            prompt += """
+**REGRAS OBRIGATÓRIAS:**
+
+1. Formato: [Tema/Projeto] - [Técnica/Aplicação específica]
+2. Limite: 60-80 caracteres (conte caracteres!)
+3. DESCRITIVO (não clickbait)
+4. Sem emojis, hashtags ou caps lock
+5. Português BR
+6. Foco em CONTEÚDO técnico, não em sentimento/engajamento
+
+**EXEMPLOS CORRETOS:**
+
+❌ ERRADO: "Imagine a series in this animation style 😭🔥"
+✅ CERTO: "Marvel Rivals Cinematic - VFX de partículas e câmera dinâmica"
+
+❌ ERRADO: "RELEASE THEM PLEASE 🥺🥺"
+✅ CERTO: "Arcane Discord PFP - Sistema de perfis customizáveis"
+
+❌ ERRADO: "This is how to ASPECT RATIO"
+✅ CERTO: "Tutorial Aspect Ratio - Técnicas de máscara expansível"
+
+**RETORNE APENAS O TÍTULO (sem explicações):**"""
+
+            logger.info("🏷️ Gerando smart_title...")
+
+            # Chamar Claude (Haiku é mais rápido e barato para tarefa simples)
+            output = self.client.run(
+                "anthropic/claude-3.5-haiku",  # Mais rápido/barato para títulos
+                input={
+                    "prompt": prompt,
+                    "max_tokens": 100,  # Título é curto
+                    "temperature": 0.3,  # Baixa criatividade (queremos consistência)
+                    "top_p": 0.9
+                }
+            )
+
+            # Extrair resposta
+            smart_title = ""
+            for chunk in output:
+                smart_title += chunk
+
+            # Limpar resposta
+            smart_title = smart_title.strip()
+
+            # Remover aspas se houver
+            if smart_title.startswith('"') and smart_title.endswith('"'):
+                smart_title = smart_title[1:-1]
+            if smart_title.startswith("'") and smart_title.endswith("'"):
+                smart_title = smart_title[1:-1]
+
+            # Validar tamanho (limite 80 caracteres)
+            if len(smart_title) > 80:
+                smart_title = smart_title[:77] + "..."
+                logger.warning(f"⚠️ Smart title truncado para 80 chars: {smart_title}")
+
+            logger.info(f"✅ Smart title gerado ({len(smart_title)} chars): {smart_title}")
+            return smart_title
+
+        except Exception as e:
+            logger.error(f"❌ Erro ao gerar smart_title: {str(e)}")
+            return None
+
     def is_available(self) -> bool:
         """Verifica se o serviço está disponível"""
         return self.client is not None

@@ -121,11 +121,12 @@ def export_quality_report(limit: int = 5):
 
                 if video_transcript:
                     report_lines.append(f"\n**📝 Transcrição de Áudio** ({len(video_transcript)} caracteres):\n")
-                    report_lines.append(f"```\n{video_transcript[:500]}{'...' if len(video_transcript) > 500 else ''}\n```\n")
+                    report_lines.append(f"```\n{video_transcript}\n```\n")
 
-                if visual_analysis:
-                    report_lines.append(f"\n**👁️ Análise Visual**:\n")
-                    report_lines.append(f"{visual_analysis[:500]}{'...' if len(visual_analysis) > 500 else ''}\n")
+                # ✅ Só mostrar visual_analysis se for DIFERENTE de transcript (evitar duplicação)
+                if visual_analysis and visual_analysis != video_transcript:
+                    report_lines.append(f"\n**👁️ Análise Visual** ({len(visual_analysis)} caracteres):\n")
+                    report_lines.append(f"{visual_analysis}\n")
 
                 if audio_analysis:
                     report_lines.append(f"\n**🔊 Análise de Áudio**:\n")

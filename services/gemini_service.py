@@ -76,7 +76,7 @@ class GeminiService:
                     "prompt": prompt,
                     "videos": [video_url],  # Array de URIs (corrigido de "video" para "videos")
                     "temperature": 0.3,  # Baixa temperatura = mais determinístico
-                    "max_output_tokens": 4096,  # Análise detalhada (corrigido de "max_tokens")
+                    "max_output_tokens": 16384,  # ✅ AUMENTADO: Permite análise completa de vídeos longos
                     "top_p": 0.9,
                 }
             )

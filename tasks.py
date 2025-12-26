@@ -449,7 +449,32 @@ def process_claude_task(self, previous_result: dict, bookmark_id: str, user_id: 
         if not result:
             raise Exception("Gemini Pro retornou None")
 
-        # 3. Salvar no Supabase
+        # 3. Gerar Smart Title (título otimizado para recuperação - metodologia CODE)
+        smart_title = None
+        try:
+            logger.debug("🏷️ Gerando smart title...")
+
+            # Extrair visual_analysis se disponível
+            visual_analysis = previous_result.get('visual_analysis', None)
+
+            smart_title = loop.run_until_complete(
+                claude_service.generate_smart_title(
+                    auto_description=result.get('auto_description', ''),
+                    auto_tags=result.get('auto_tags', []),
+                    user_context=user_context,
+                    visual_analysis=visual_analysis
+                )
+            )
+
+            if smart_title:
+                logger.info(f"✅ Smart title gerado: {smart_title[:60]}")
+            else:
+                logger.warning("⚠️ Smart title retornou None - usando título original")
+        except Exception as e:
+            logger.warning(f"⚠️ Erro ao gerar smart title (não crítico): {str(e)[:50]}")
+            smart_title = None
+
+        # 4. Salvar no Supabase
 
         update_data = {
             'auto_description': result.get('auto_description', ''),
@@ -458,6 +483,10 @@ def process_claude_task(self, previous_result: dict, bookmark_id: str, user_id: 
             'relevance_score': result.get('relevance_score', 0.5),
             'ai_processed': True,
         }
+
+        # Adicionar smart_title se foi gerado
+        if smart_title:
+            update_data['smart_title'] = smart_title
 
         # Adicionar filtered_comments se disponível
         if 'filtered_comments' in result:
@@ -477,7 +506,8 @@ def process_claude_task(self, previous_result: dict, bookmark_id: str, user_id: 
         timer.success(
             Tags=len(result.get('auto_tags', [])),
             Categorias=len(result.get('auto_categories', [])),
-            Relevância=f"{result.get('relevance_score', 0):.2f}"
+            Relevância=f"{result.get('relevance_score', 0):.2f}",
+            SmartTitle="✓" if smart_title else "✗"
         )
 
         # 4. Retornar dados para próxima task
