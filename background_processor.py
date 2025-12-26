@@ -179,6 +179,7 @@ async def process_bookmark_background(
         if metadata:
             update_data['title'] = metadata.get('title')
             update_data['platform'] = metadata.get('platform')
+            update_data['cloud_thumbnail_url'] = metadata.get('cloud_thumbnail_url')  # URL permanente da thumbnail no Supabase Storage
             update_data['metadata'] = metadata  # JSON completo com TODOS os campos
 
         # Adicionar análise Gemini se rodou
