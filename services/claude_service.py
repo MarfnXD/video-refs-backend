@@ -253,8 +253,14 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
                 video_transcript, visual_analysis, user_context
             )
 
+            # DEBUG: Log do prompt sendo enviado
+            logger.debug(f"📝 DEBUG - Prompt length: {len(prompt)} chars")
+            logger.debug(f"📝 DEBUG - Prompt preview (primeiros 500 chars):\n{prompt[:500]}")
+
             # Chamar Gemini 3 Pro via Replicate
             logger.info(f"🔮 Chamando Gemini 3 Pro (auto) com thinking_level=high...")
+            logger.debug(f"🔮 DEBUG - Input parameters: max_output_tokens=1024, temperature=1.0, top_p=0.95, top_k=40, thinking_level=high")
+
             output = self.client.run(
                 self.model_version,
                 input={
