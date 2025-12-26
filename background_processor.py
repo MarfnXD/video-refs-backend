@@ -69,30 +69,31 @@ async def process_bookmark_background(
         if extract_metadata:
             logger.info(f"📥 Extraindo metadados via Apify...")
 
-            # Determinar plataforma
-            platform = None
-            if 'youtube.com' in url or 'youtu.be' in url:
-                platform = 'youtube'
-            elif 'instagram.com' in url:
-                platform = 'instagram'
-            elif 'tiktok.com' in url:
-                platform = 'tiktok'
+            try:
+                # Usa método unificado que detecta plataforma automaticamente
+                video_metadata = await apify_service.extract_metadata(url)
 
-            if platform:
-                # Extrair metadados via Apify
-                if platform == 'youtube':
-                    metadata = await apify_service.extract_metadata_youtube(url)
-                elif platform == 'instagram':
-                    metadata = await apify_service.extract_metadata_instagram(url)
-                elif platform == 'tiktok':
-                    metadata = await apify_service.extract_metadata_tiktok(url)
-
-                if metadata:
+                if video_metadata:
+                    # Converter VideoMetadata para dict
+                    metadata = {
+                        'title': video_metadata.title,
+                        'description': video_metadata.description,
+                        'thumbnail_url': video_metadata.thumbnail_url,
+                        'direct_video_url': video_metadata.direct_video_url,
+                        'duration_seconds': video_metadata.duration_seconds,
+                        'view_count': video_metadata.view_count,
+                        'like_count': video_metadata.like_count,
+                        'comment_count': video_metadata.comment_count,
+                        'hashtags': video_metadata.hashtags,
+                        'top_comments': video_metadata.top_comments,
+                        'platform': video_metadata.platform.value if video_metadata.platform else None,
+                    }
                     logger.info(f"✅ Metadados extraídos: {metadata.get('title', 'N/A')[:50]}")
                 else:
                     logger.warning(f"⚠️ Apify não retornou metadados")
-            else:
-                logger.warning(f"⚠️ Plataforma não suportada: {url}")
+            except Exception as e:
+                logger.error(f"❌ Erro ao extrair metadados: {str(e)}")
+                # Não bloqueia - continua sem metadados
 
         # ============================================================
         # PASSO 3: Analisar vídeo com Gemini Flash 2.5 (OPCIONAL)
