@@ -193,8 +193,8 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
             # DEBUG: Log dos parâmetros recebidos
             logger.debug(f"📊 Parâmetros recebidos:")
             logger.debug(f"   title: {len(title)} chars")
-            logger.debug(f"   visual_analysis: {len(visual_analysis)} chars")
-            logger.debug(f"   user_context: {len(user_context)} chars")
+            logger.debug(f"   visual_analysis: {len(visual_analysis) if visual_analysis else 0} chars")
+            logger.debug(f"   user_context: {len(user_context) if user_context else 0} chars")
             if visual_analysis:
                 logger.debug(f"   visual_analysis preview: {visual_analysis[:200]}...")
 

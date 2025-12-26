@@ -69,15 +69,15 @@ class GeminiService:
             prompt = self._build_analysis_prompt(user_context)
 
             # Chamar Gemini via Replicate
+            # IMPORTANTE: Parâmetro correto é "videos" (plural, array) e não "video" (singular)
             output = self.client.run(
                 self.model_version,
                 input={
                     "prompt": prompt,
-                    "video": video_url,
+                    "videos": [video_url],  # Array de URIs (corrigido de "video" para "videos")
                     "temperature": 0.3,  # Baixa temperatura = mais determinístico
-                    "max_tokens": 4096,  # Análise detalhada
+                    "max_output_tokens": 4096,  # Análise detalhada (corrigido de "max_tokens")
                     "top_p": 0.9,
-                    "top_k": 40,
                 }
             )
 
