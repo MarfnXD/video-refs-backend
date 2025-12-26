@@ -28,12 +28,11 @@ class GeminiService:
         else:
             self.client = replicate.Client(api_token=api_token)
 
-        # Modelo Gemini Flash 2.5 no Replicate
-        # Nota: atualizar versão quando Replicate lançar Gemini 2.5
-        # Por enquanto usamos a versão mais recente disponível
+        # Modelo Gemini Flash 2.5 no Replicate (versão correta)
+        # google/gemini-2.5-flash: modelo multimodal mais recente com suporte a vídeo
         self.model_version = os.getenv(
             "GEMINI_MODEL_VERSION",
-            "google-deepmind/gemini-2.0-flash-exp:2f0f1c6f3de61e50ada25e97a6ff7d1a28decc8a82b9d93adcb33ee8f42e614d"
+            "google/gemini-2.5-flash"
         )
 
     async def analyze_video(
