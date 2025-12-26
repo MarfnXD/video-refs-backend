@@ -180,15 +180,15 @@ async def process_bookmark_background(
             update_data['description'] = metadata.get('description')
             update_data['thumbnail_url'] = metadata.get('thumbnail_url')
             update_data['cloud_thumbnail_url'] = metadata.get('cloud_thumbnail_url')
-            update_data['duration'] = metadata.get('duration')
-            update_data['views'] = metadata.get('views')
-            update_data['likes'] = metadata.get('likes')
-            update_data['comments_count'] = metadata.get('comments_count')
-            update_data['author'] = metadata.get('author')
-            update_data['author_url'] = metadata.get('author_url')
-            update_data['published_at'] = metadata.get('published_at')
+            # update_data['duration'] = metadata.get('duration')  # TODO: adicionar coluna
+            # update_data['views'] = metadata.get('views')  # TODO: adicionar coluna
+            # update_data['likes'] = metadata.get('likes')  # TODO: adicionar coluna
+            # update_data['comments_count'] = metadata.get('comments_count')  # TODO: adicionar coluna
+            # update_data['author'] = metadata.get('author')  # TODO: adicionar coluna
+            # update_data['author_url'] = metadata.get('author_url')  # TODO: adicionar coluna
+            # update_data['published_at'] = metadata.get('published_at')  # TODO: adicionar coluna
             update_data['platform'] = metadata.get('platform')
-            update_data['metadata'] = metadata  # JSON completo
+            update_data['metadata'] = metadata  # JSON completo (contém todos os campos)
 
         # Adicionar análise Gemini se rodou
         if gemini_analysis:
