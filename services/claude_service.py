@@ -85,8 +85,25 @@ class ClaudeService:
 
             logger.debug(f"Resposta Claude: {response_text}")
 
-            # Parse JSON
-            result = json.loads(response_text)
+            # Parse JSON (Claude pode retornar JSON + texto explicativo depois)
+            # Extrair apenas a parte JSON (até o último } que fecha o objeto)
+            json_text = response_text.strip()
+
+            # Se tem texto extra depois do JSON, encontrar onde o JSON termina
+            if '\n\n' in json_text:
+                # Tenta encontrar onde termina o JSON (procura por } seguido de linha vazia)
+                lines = json_text.split('\n')
+                json_lines = []
+                brace_count = 0
+                for line in lines:
+                    json_lines.append(line)
+                    brace_count += line.count('{') - line.count('}')
+                    # Quando chaves balancearem em zero, JSON completo
+                    if brace_count == 0 and '{' in ''.join(json_lines):
+                        break
+                json_text = '\n'.join(json_lines)
+
+            result = json.loads(json_text)
 
             logger.info(f"✅ Processamento concluído: {len(result.get('tags', []))} tags, {len(result.get('suggested_categories', []))} categorias")
             return result
@@ -233,8 +250,25 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
 
             logger.debug(f"Resposta Claude (auto): {response_text}")
 
-            # Parse JSON
-            result = json.loads(response_text)
+            # Parse JSON (Claude pode retornar JSON + texto explicativo depois)
+            # Extrair apenas a parte JSON (até o último } que fecha o objeto)
+            json_text = response_text.strip()
+
+            # Se tem texto extra depois do JSON, encontrar onde o JSON termina
+            if '\n\n' in json_text:
+                # Tenta encontrar onde termina o JSON (procura por } seguido de linha vazia)
+                lines = json_text.split('\n')
+                json_lines = []
+                brace_count = 0
+                for line in lines:
+                    json_lines.append(line)
+                    brace_count += line.count('{') - line.count('}')
+                    # Quando chaves balancearem em zero, JSON completo
+                    if brace_count == 0 and '{' in ''.join(json_lines):
+                        break
+                json_text = '\n'.join(json_lines)
+
+            result = json.loads(json_text)
 
             # Adicionar comentários filtrados ao resultado
             result['filtered_comments'] = filtered_comments_list
