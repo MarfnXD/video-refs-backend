@@ -24,7 +24,8 @@ class ClaudeService:
         else:
             self.client = replicate.Client(api_token=api_token)
 
-        # Modelo: Gemini 3 Pro (Google, novembro 2025)
+        # Modelo: Gemini 3 Pro (Google) via Replicate
+        # https://replicate.com/google/gemini-3-pro
         self.model_version = "google/gemini-3-pro"
 
     async def process_context(
@@ -59,7 +60,7 @@ class ClaudeService:
             return None
 
         try:
-            logger.info(f"🧠 Processando contexto com Claude via Replicate...")
+            logger.info(f"🧠 Processando contexto com Gemini 3 Pro via Replicate...")
 
             # Preparar listas para o prompt
             categories_list = ", ".join(user_categories) if user_categories else "Nenhuma categoria ainda"
@@ -77,23 +78,33 @@ class ClaudeService:
 
             # Chamar Gemini 3 Pro via Replicate
             # https://replicate.com/google/gemini-3-pro
+            logger.info(f"🔮 Chamando Gemini 3 Pro com thinking_level=high...")
             output = self.client.run(
                 self.model_version,
                 input={
                     "prompt": prompt,
-                    "max_output_tokens": 1024,  # Gemini 3 usa max_output_tokens (não max_tokens)
+                    "max_output_tokens": 1024,  # Gemini 3 usa max_output_tokens
                     "temperature": 1.0,  # Gemini 3: recomenda manter em 1.0 (default)
                     "top_p": 0.95,  # Gemini 3 default
+                    "top_k": 40,  # Gemini 3 default
                     "thinking_level": "high"  # Máximo raciocínio (específico Gemini 3)
                 }
             )
 
-            # Extrair resposta (output é um iterator de strings)
+            # DEBUG: Log do tipo de output retornado
+            logger.debug(f"🔍 DEBUG - Tipo de output: {type(output)}")
+            logger.debug(f"🔍 DEBUG - Output object: {output}")
+
+            # Extrair resposta (output é um iterator de strings segundo schema)
             response_text = ""
+            chunk_count = 0
             for chunk in output:
+                chunk_count += 1
+                logger.debug(f"🔍 DEBUG - Chunk {chunk_count}: {type(chunk)} = {repr(chunk)[:200]}")
                 response_text += chunk
 
-            logger.debug(f"Resposta Gemini 3 Pro: {response_text}")
+            logger.debug(f"✅ DEBUG - Total de chunks: {chunk_count}, texto final: {len(response_text)} chars")
+            logger.debug(f"Resposta Gemini 3 Pro: {response_text[:500]}...")
 
             # Parse JSON (Claude pode retornar JSON + texto explicativo depois)
             # Extrair apenas a parte JSON (até o último } que fecha o objeto)
@@ -120,7 +131,7 @@ class ClaudeService:
 
         except json.JSONDecodeError as e:
             logger.error(f"❌ Erro ao parsear JSON da resposta Gemini 3 Pro: {str(e)}")
-            logger.error(f"Resposta raw: {response_text}")
+            logger.error(f"Resposta raw (primeiros 1000 chars): {response_text[:1000]}")
             return None
         except Exception as e:
             logger.error(f"❌ Erro ao processar contexto com Gemini 3 Pro: {str(e)}")
@@ -243,23 +254,33 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
             )
 
             # Chamar Gemini 3 Pro via Replicate
+            logger.info(f"🔮 Chamando Gemini 3 Pro (auto) com thinking_level=high...")
             output = self.client.run(
                 self.model_version,
                 input={
                     "prompt": prompt,
-                    "max_output_tokens": 1024,  # Gemini 3 usa max_output_tokens (não max_tokens)
+                    "max_output_tokens": 1024,  # Gemini 3 usa max_output_tokens
                     "temperature": 1.0,  # Gemini 3: recomenda manter em 1.0 (default)
                     "top_p": 0.95,  # Gemini 3 default
+                    "top_k": 40,  # Gemini 3 default
                     "thinking_level": "high"  # Máximo raciocínio (específico Gemini 3)
                 }
             )
 
-            # Extrair resposta
+            # DEBUG: Log do tipo de output retornado
+            logger.debug(f"🔍 DEBUG (auto) - Tipo de output: {type(output)}")
+            logger.debug(f"🔍 DEBUG (auto) - Output object: {output}")
+
+            # Extrair resposta (output é um iterator de strings segundo schema)
             response_text = ""
+            chunk_count = 0
             for chunk in output:
+                chunk_count += 1
+                logger.debug(f"🔍 DEBUG (auto) - Chunk {chunk_count}: {type(chunk)} = {repr(chunk)[:200]}")
                 response_text += chunk
 
-            logger.debug(f"Resposta Gemini 3 Pro (auto): {response_text}")
+            logger.debug(f"✅ DEBUG (auto) - Total de chunks: {chunk_count}, texto final: {len(response_text)} chars")
+            logger.debug(f"Resposta Gemini 3 Pro (auto): {response_text[:500]}...")
 
             # Parse JSON (Claude pode retornar JSON + texto explicativo depois)
             # Extrair apenas a parte JSON (até o último } que fecha o objeto)
@@ -289,10 +310,10 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
 
         except json.JSONDecodeError as e:
             logger.error(f"❌ Erro ao parsear JSON da resposta Gemini 3 Pro (auto): {str(e)}")
-            logger.error(f"Resposta raw: {response_text}")
+            logger.error(f"Resposta raw (primeiros 1000 chars): {response_text[:1000] if response_text else 'VAZIO'}")
             return None
         except Exception as e:
-            logger.error(f"❌ Erro ao processar metadados automaticamente: {str(e)}")
+            logger.error(f"❌ Erro ao processar metadados automaticamente com Gemini 3 Pro: {str(e)}")
             return None
 
     def _is_generic_comment(self, text: str) -> bool:
@@ -490,7 +511,7 @@ RETORNE APENAS JSON:
             Dict com auto_description, auto_tags, auto_categories, relevance_score
         """
         if not self.client:
-            logger.error("❌ Gemini 3 Pro client não inicializado (REPLICATE_API_TOKEN faltando)")
+            logger.error("❌ Claude client não inicializado (REPLICATE_API_TOKEN faltando)")
             return None
 
         try:
