@@ -14,12 +14,14 @@ from supabase import create_client, Client
 from services.apify_service import ApifyService
 from services.claude_service import claude_service
 from services.gemini_service import GeminiService
+from services.video_storage_service import VideoStorageService
 
 logger = logging.getLogger(__name__)
 
 # Inicializar services
 apify_service = ApifyService()
 gemini_service = GeminiService()
+video_storage_service = VideoStorageService()
 
 # Supabase client
 supabase_url = os.getenv("SUPABASE_URL")
@@ -102,21 +104,66 @@ async def process_bookmark_background(
                 # Não bloqueia - continua sem metadados
 
         # ============================================================
-        # PASSO 3: Analisar vídeo com Gemini Flash 2.5 (OPCIONAL)
+        # PASSO 3: Upload vídeo + Análise Gemini Flash 2.5
         # ============================================================
-        # DESABILITADO TEMPORARIAMENTE - VideoMetadata não tem direct_video_url
-        # TODO: Integrar com serviço de download para obter URL direta
         gemini_analysis = None
-        # if analyze_video and metadata:
-        #     logger.info(f"🎬 Analisando vídeo com Gemini Flash 2.5...")
-        #     try:
-        #         gemini_analysis = await gemini_service.analyze_video(
-        #             video_url=url,
-        #             user_context=user_context
-        #         )
-        #         logger.info(f"✅ Análise Gemini completa!")
-        #     except Exception as e:
-        #         logger.error(f"❌ Erro ao analisar com Gemini: {str(e)}")
+        cloud_video_url = None
+        temp_video_path = None
+
+        if upload_to_cloud and metadata:
+            try:
+                # 3.1: Extrair URL direta do vídeo (Apify)
+                logger.info(f"📥 Extraindo URL direta do vídeo...")
+
+                # Detectar plataforma e extrair URL de download
+                download_info = None
+                if 'instagram' in url.lower():
+                    download_info = await apify_service.extract_video_download_url_instagram(url)
+                elif 'tiktok' in url.lower():
+                    download_info = await apify_service.extract_video_download_url_tiktok(url)
+                elif 'youtube' in url.lower() or 'youtu.be' in url.lower():
+                    download_info = await apify_service.extract_video_download_url_youtube(url)
+
+                if download_info and download_info.get('download_url'):
+                    video_download_url = download_info['download_url']
+                    logger.info(f"✅ URL direta obtida: {video_download_url[:50]}...")
+
+                    # 3.2: Download + Upload para Supabase Storage
+                    logger.info(f"☁️ Baixando e fazendo upload para Supabase Storage...")
+
+                    upload_result = await video_storage_service.download_and_upload_video(
+                        video_url=video_download_url,
+                        user_id=user_id,
+                        bookmark_id=bookmark_id
+                    )
+
+                    if upload_result:
+                        cloud_video_url, temp_video_path = upload_result
+                        logger.info(f"✅ Vídeo na cloud: {cloud_video_url[:50]}...")
+
+                        # 3.3: Análise Gemini usando vídeo da cloud
+                        if analyze_video:
+                            logger.info(f"🎬 Analisando vídeo com Gemini Flash 2.5...")
+
+                            try:
+                                gemini_analysis = await gemini_service.analyze_video(
+                                    video_url=cloud_video_url,
+                                    user_context=user_context
+                                )
+                                logger.info(f"✅ Análise Gemini completa!")
+                                logger.info(f"   Transcrição: {len(gemini_analysis.get('transcript', ''))} caracteres")
+                                logger.info(f"   Análise Visual: {len(gemini_analysis.get('visual_analysis', ''))} caracteres")
+                            except Exception as e:
+                                logger.error(f"❌ Erro ao analisar com Gemini: {str(e)}")
+                                # Gemini falhou mas vídeo já está na cloud (continua)
+                    else:
+                        logger.warning(f"⚠️ Upload para cloud falhou")
+                else:
+                    logger.warning(f"⚠️ Não foi possível extrair URL de download")
+
+            except Exception as e:
+                logger.error(f"❌ Erro no fluxo de upload/análise: {str(e)}")
+                # Não bloqueia - continua sem vídeo na cloud
 
         # ============================================================
         # PASSO 4: Processar com IA (Claude)
@@ -185,7 +232,13 @@ async def process_bookmark_background(
             update_data['published_at'] = metadata.get('published_at')  # Data de publicação
             update_data['metadata'] = metadata  # JSON completo com TODOS os campos
 
-        # Adicionar análise Gemini se rodou
+        # Adicionar cloud_video_url se fez upload
+        if cloud_video_url:
+            update_data['cloud_video_url'] = cloud_video_url
+            update_data['cloud_upload_status'] = 'completed'
+            update_data['cloud_uploaded_at'] = 'now()'
+
+        # Adicionar análise Gemini se rodou (SALVO SEPARADO - você vê o que Gemini "viu")
         if gemini_analysis:
             update_data['video_transcript'] = gemini_analysis.get('transcript')
             update_data['visual_analysis'] = gemini_analysis.get('visual_analysis')
@@ -207,6 +260,10 @@ async def process_bookmark_background(
 
         # UPDATE no Supabase
         supabase.table('bookmarks').update(update_data).eq('id', bookmark_id).execute()
+
+        # Limpar arquivo temporário (libera espaço no Render)
+        if temp_video_path:
+            video_storage_service.cleanup_temp_file(temp_video_path)
 
         logger.info(f"✅ PROCESSAMENTO COMPLETO - Bookmark: {bookmark_id}")
         logger.info(f"   Status: completed")
