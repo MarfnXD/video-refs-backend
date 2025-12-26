@@ -351,7 +351,8 @@ class ApifyService:
                 "searchType": "hashtag",
                 "searchLimit": 1,
                 "addParentData": False,  # Reduz dados para evitar timeouts
-                "commentsLimit": 200,  # ← NOVO: Solicitar 200 comentários
+                # NOTA: latestComments retorna apenas ~6 comentários (preview)
+                # Para extrair TODOS os comentários, use extract_all_comments()
                 "extendOutputFunction": "",
                 "extendScraperFunction": ""
             }
@@ -382,9 +383,6 @@ class ApifyService:
             top_comments = []
             try:
                 if "latestComments" in data and data["latestComments"]:
-                    # LOG: Quantidade retornada pelo Apify
-                    print(f"🔍 DEBUG: Apify retornou {len(data['latestComments'])} comentários no campo latestComments")
-
                     # Converter para lista e ordenar por likes (comentários mais relevantes primeiro)
                     comments_list = [
                         c for c in data["latestComments"][:200]
@@ -721,6 +719,76 @@ class ApifyService:
         except Exception as e:
             print(f"❌ yt-dlp falhou completamente: {str(e)}")
             raise ValueError(f"Erro ao extrair URL de download do Instagram (yt-dlp): {str(e)}")
+
+    async def extract_all_instagram_comments(
+        self,
+        post_url: str,
+        max_comments: int = 1000
+    ) -> List[Comment]:
+        """
+        Extrai TODOS os comentários de um post do Instagram usando o scraper dedicado.
+
+        USO HÍBRIDO:
+        - extract_instagram_reel() retorna ~6 comentários (preview rápido)
+        - extract_all_instagram_comments() retorna TODOS os comentários (análise profunda)
+
+        Args:
+            post_url: URL do post do Instagram (https://www.instagram.com/p/...)
+            max_comments: Máximo de comentários a extrair (default: 1000)
+
+        Returns:
+            Lista de Comment ordenados por likes (mais relevantes primeiro)
+
+        Custo: $2.30 por 1,000 comentários extraídos
+        Tempo: ~30-60s dependendo da quantidade
+        """
+        if not self.apify_token:
+            raise ValueError("Apify token não configurado")
+
+        print(f"🔄 Extraindo TODOS os comentários do post: {post_url}")
+        print(f"   Limite: {max_comments} comentários")
+        print(f"   Custo estimado: ${(max_comments / 1000) * 2.30:.2f}")
+
+        try:
+            run_input = {
+                "directUrls": [post_url],
+                "resultsLimit": max_comments,
+            }
+
+            # Executar Instagram Comments Scraper
+            async def run_comments_scraper(client: ApifyClient):
+                run = client.actor("apify/instagram-comment-scraper").call(
+                    run_input=run_input,
+                    timeout_secs=300  # 5 minutos max
+                )
+                items = []
+                for item in client.dataset(run["defaultDatasetId"]).iterate_items():
+                    items.append(item)
+                return items
+
+            # Tenta com todos os tokens disponíveis
+            comments_data = await self._try_all_clients(run_comments_scraper, "extract_all_instagram_comments")
+
+            # Converter para lista de Comment
+            all_comments = []
+            for comment_data in comments_data:
+                all_comments.append(Comment(
+                    text=comment_data.get("text", ""),
+                    author=comment_data.get("ownerUsername", ""),
+                    likes=comment_data.get("likesCount", 0)
+                ))
+
+            # Ordenar por likes (mais relevantes primeiro)
+            all_comments.sort(key=lambda x: x.likes, reverse=True)
+
+            print(f"✅ {len(all_comments)} comentários extraídos com sucesso!")
+            print(f"   Top comentário: \"{all_comments[0].text[:60]}...\" ({all_comments[0].likes:,} likes)")
+
+            return all_comments
+
+        except Exception as e:
+            print(f"❌ Erro ao extrair todos os comentários: {str(e)}")
+            raise ValueError(f"Falha ao extrair comentários do Instagram: {str(e)}")
 
     async def close(self):
         if self.redis_client:
