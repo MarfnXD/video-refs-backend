@@ -337,42 +337,55 @@ RETORNE APENAS JSON (sem markdown, sem explicações):
         """Constrói o prompt para processamento automático de metadados"""
         return f"""Você é um assistente que extrai tags e categorias de vídeos de referência criativa.
 
-DADOS DISPONÍVEIS:
+DADOS DISPONÍVEIS (em ordem de confiabilidade):
 
-👤 CONTEXTO DO USUÁRIO (peso máximo):
-{user_context if user_context else 'Não fornecido'}
-
-🎬 DESCRIÇÃO DO VÍDEO (Gemini Flash 2.5 - timeline objetiva):
+🎬 ANÁLISE VISUAL DO VÍDEO (Gemini Flash 2.5 - FONTE PRIMÁRIA):
 {visual_analysis if visual_analysis else 'Não disponível'}
+⚠️ Esta é a VERDADE ABSOLUTA - o Gemini VIU o vídeo completo e descreveu objetivamente.
 
-📌 TÍTULO: "{title}"
-📄 DESCRIÇÃO: "{description or 'Não disponível'}"
-#️⃣ HASHTAGS: {hashtags_str}
-💬 COMENTÁRIOS: {comments_str}
+👤 CONTEXTO DO USUÁRIO (2ª prioridade - se fornecido):
+{user_context if user_context else 'Não fornecido'}
+⚠️ Se fornecido, o usuário sabe POR QUE salvou - considere fortemente na análise.
 
-INSTRUÇÕES:
+📊 METADADOS EXTERNOS (Apify - VALIDAR CRITICAMENTE):
+- Título: "{title}"
+- Descrição: "{description or 'Não disponível'}"
+- Hashtags: {hashtags_str}
+- Comentários: {comments_str}
 
-1. **Leia todos os dados objetivamente** - não force interpretações
-2. **Extraia o que REALMENTE está no vídeo** baseado na descrição do Gemini
-3. **Priorize o contexto do usuário** (se fornecido) - ele sabe por que salvou
-4. **Crie tags descritivas** baseadas no que VÊ, não no que imagina
-5. **Sugira categorias** que fazem sentido com o conteúdo real
+⚠️ IMPORTANTE: Estes metadados podem estar ERRADOS ou ser CLICKBAIT.
+Você DEVE validar se fazem sentido com o que o Gemini descreveu.
 
-REGRAS:
-- Se descrição Gemini menciona "animação 3D", crie tag natural: "3d-animation"
-- Se menciona "filmagem real", não force tags de CGI
-- Se menciona técnicas específicas (jump cut, color grading), extraia como tags
-- NÃO invente informações que não estão nos dados
-- NÃO force categorias pré-concebidas (tipo FOOH) se não houver evidência clara
+INSTRUÇÕES DE VALIDAÇÃO:
 
-HIERARQUIA (ordem de confiança):
-1️⃣ Contexto do usuário (se fornecido) = MÁXIMA prioridade
-2️⃣ Descrição do vídeo (Gemini) = fonte objetiva
-3️⃣ Título + Descrição = contexto adicional
-4️⃣ Hashtags = baixa confiança
-5️⃣ Comentários = MENOR confiança (interpretações pessoais)
+1. **Comece pela análise do Gemini** - ela é a fonte primária de verdade
+2. **Se houver contexto do usuário**, considere fortemente (ele sabe por que salvou)
+3. **Valide os metadados Apify criticamente**:
+   - O título/descrição BATE com o que o Gemini descreveu?
+   - Os comentários fazem sentido com a análise visual?
+   - As hashtags são relevantes ou apenas spam/clickbait?
+4. **IGNORE dados que contradizem o Gemini**:
+   - Exemplo: Gemini diz "animação 3D de Monsters Inc" mas título diz "marketing com AI"
+   - Neste caso: IGNORE o título, baseie-se NO QUE REALMENTE ESTÁ NO VÍDEO
+5. **Use apenas dados que AGREGAM à análise do Gemini**:
+   - Se título/comentários adicionam contexto útil → use
+   - Se são genéricos/contraditórios/clickbait → ignore
 
-CATEGORIAS DISPONÍVEIS (use as que REALMENTE fazem sentido):
+REGRAS DE EXTRAÇÃO:
+
+- Tags devem refletir o que o Gemini VIU (não o que título/comentários dizem)
+- Se Gemini menciona "animação 3D" → tag: "3d-animation"
+- Se Gemini menciona técnica específica (jump cut, slow motion) → tag com a técnica
+- Categorias devem fazer sentido com CONTEÚDO REAL do vídeo
+- NÃO force FOOH/CGI se Gemini não mencionar explicitamente outdoor/billboard CGI
+
+HIERARQUIA FINAL (ordem de prioridade):
+
+1️⃣ Análise Visual Gemini = VERDADE ABSOLUTA (ele VIU o vídeo!)
+2️⃣ Contexto do usuário = 2ª prioridade (se fornecido)
+3️⃣ Metadados Apify = Use APENAS se validarem com Gemini
+
+CATEGORIAS DISPONÍVEIS:
 - Técnica de Edição
 - Referência Visual
 - Ideia de Conteúdo
@@ -382,12 +395,12 @@ CATEGORIAS DISPONÍVEIS (use as que REALMENTE fazem sentido):
 - Storytelling
 - Tutorial
 - Case de Sucesso
-- FOOH / CGI Advertising (APENAS se descrição Gemini mencionar explicitamente FOOH/outdoor CGI)
+- FOOH / CGI Advertising (APENAS se Gemini mencionar outdoor/billboard CGI em ambiente real)
 - Outro
 
 RETORNE APENAS JSON:
 {{
-  "auto_description": "string (1-2 frases descrevendo objetivamente o vídeo)",
+  "auto_description": "string (baseado PRINCIPALMENTE na análise Gemini)",
   "auto_tags": ["tag1", "tag2", "tag3", "tag4", "tag5"],
   "auto_categories": ["categoria1", "categoria2"],
   "confidence": "high|medium|low",
