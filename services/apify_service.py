@@ -382,6 +382,9 @@ class ApifyService:
             top_comments = []
             try:
                 if "latestComments" in data and data["latestComments"]:
+                    # LOG: Quantidade retornada pelo Apify
+                    print(f"🔍 DEBUG: Apify retornou {len(data['latestComments'])} comentários no campo latestComments")
+
                     # Converter para lista e ordenar por likes (comentários mais relevantes primeiro)
                     comments_list = [
                         c for c in data["latestComments"][:200]

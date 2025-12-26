@@ -178,8 +178,8 @@ def export_quality_report(limit: int = 5):
             report_lines.append(f"- **Metadados extraídos**: {'✅ Sim' if metadata else '❌ Não'}\n")
             report_lines.append(f"- **Análise visual**: {'✅ Sim' if (video_transcript or visual_analysis) else '❌ Não'}\n")
             report_lines.append(f"- **IA processou**: {'✅ Sim' if ai_processed else '❌ Não'}\n")
-            report_lines.append(f"- **Tags geradas**: {len(auto_tags)}\n")
-            report_lines.append(f"- **Categorias geradas**: {len(auto_categories)}\n")
+            report_lines.append(f"- **Tags geradas**: {len(auto_tags) if auto_tags else 0}\n")
+            report_lines.append(f"- **Categorias geradas**: {len(auto_categories) if auto_categories else 0}\n")
             report_lines.append(f"- **Status final**: `{bookmark.get('processing_status', 'N/A')}`\n")
 
             report_lines.append("\n" + "="*80 + "\n\n")
