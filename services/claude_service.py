@@ -664,12 +664,12 @@ Tags principais: {tags_str}
 
 **RETORNE APENAS O TÍTULO (sem explicações):**"""
 
-            logger.info("🏷️ Gerando smart_title com Gemini 2.5 Flash...")
+            logger.info("🏷️ Gerando smart_title com Gemini 3 Pro...")
 
-            # Chamar Gemini 2.5 Flash (modelo LEVE, otimizado para tarefas rápidas)
-            # NÃO usar Gemini 3 Pro aqui (consome muita RAM no Render)
+            # Chamar Gemini 3 Pro (mesmo modelo usado para processamento)
+            # Usa o mesmo self.model_version que já está funcionando
             output = self.client.run(
-                "google/gemini-2.5-flash-exp:latest",  # Modelo leve (< 100MB RAM)
+                self.model_version,  # "google/gemini-3-pro" (modelo que funciona)
                 input={
                     "prompt": prompt,
                     "max_output_tokens": 150,  # Título é curto
