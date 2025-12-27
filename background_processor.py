@@ -201,39 +201,16 @@ async def process_bookmark_background(
                 auto_description = result.get('auto_description')
                 auto_tags = result.get('auto_tags', [])
                 auto_categories = result.get('auto_categories', [])
+                smart_title = result.get('smart_title')  # 🆕 Smart title já vem no JSON do Gemini!
                 confidence = result.get('confidence')
                 relevance_score = result.get('relevance_score')
 
                 logger.info(f"✅ Claude processou: {len(auto_tags)} tags, {len(auto_categories)} categorias")
+                if smart_title:
+                    logger.info(f"✅ Smart title gerado: {smart_title[:60]}")
             except Exception as e:
                 logger.error(f"❌ Erro ao processar com Claude: {str(e)}")
                 # Não bloqueia - continua sem IA
-
-        # ============================================================
-        # PASSO 4.5: Gerar Smart Title (título otimizado para recuperação)
-        # ============================================================
-        smart_title = None
-        if auto_description or auto_tags:  # Só gera se Claude rodou com sucesso
-            try:
-                logger.info(f"🏷️ Gerando smart title com Gemini 2.5 Flash...")
-
-                # Buscar visual_analysis se existir
-                visual_analysis = gemini_analysis.get('visual_analysis', None) if gemini_analysis else None
-
-                smart_title = await claude_service.generate_smart_title(
-                    auto_description=auto_description or "",
-                    auto_tags=auto_tags or [],
-                    user_context=user_context,
-                    visual_analysis=visual_analysis
-                )
-
-                if smart_title:
-                    logger.info(f"✅ Smart title gerado: {smart_title[:60]}")
-                else:
-                    logger.warning("⚠️ Smart title retornou None - usando título original")
-            except Exception as e:
-                logger.warning(f"⚠️ Erro ao gerar smart title (não crítico): {str(e)[:50]}")
-                smart_title = None
 
         # ============================================================
         # PASSO 5: Atualizar Supabase com TUDO

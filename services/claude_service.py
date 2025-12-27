@@ -500,11 +500,25 @@ CATEGORIAS DISPONÍVEIS:
 - FOOH / CGI Advertising (APENAS se Gemini mencionar outdoor/billboard CGI em ambiente real)
 - Outro
 
+TÍTULO SMART (Metodologia Tiago Forte - CODE):
+- Gere um título DESCRITIVO e OBJETIVO em vez do título clickbait original
+- Formato: "[Tema Principal] - [Técnica/Aplicação específica]"
+- Tamanho: 60-80 caracteres
+- Baseado na análise Gemini (o que REALMENTE está no vídeo)
+- Se contexto do usuário fornecido, considere seu propósito
+- Exemplos BONS:
+  * "Marvel Rivals Cinematic - VFX de partículas e câmera dinâmica"
+  * "Transição de câmera fluida - Técnica de masking com shape layer"
+- Exemplos RUINS:
+  * "RELEASE THEM PLEASE 🥺🥺" (clickbait, sem informação)
+  * "You need to try this!! 🤯" (genérico, zero contexto)
+
 RETORNE APENAS JSON:
 {{
   "auto_description": "string (baseado PRINCIPALMENTE na análise Gemini)",
   "auto_tags": ["tag1", "tag2", "tag3", "tag4", "tag5"],
   "auto_categories": ["categoria1", "categoria2"],
+  "smart_title": "string (título descritivo 60-80 chars - metodologia CODE)",
   "confidence": "high|medium|low",
   "relevance_score": 0.0-1.0
 }}"""
