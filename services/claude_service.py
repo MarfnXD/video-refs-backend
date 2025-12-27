@@ -664,16 +664,17 @@ Tags principais: {tags_str}
 
 **RETORNE APENAS O TÍTULO (sem explicações):**"""
 
-            logger.info("🏷️ Gerando smart_title...")
+            logger.info("🏷️ Gerando smart_title com Gemini 3 Pro...")
 
-            # Chamar Claude (Haiku é mais rápido e barato para tarefa simples)
+            # Chamar Gemini 3 Pro (usa mesmo cliente/modelo do ClaudeService)
             output = self.client.run(
-                "anthropic/claude-3.5-haiku",  # Mais rápido/barato para títulos
+                self.model_version,  # "google/gemini-3-pro"
                 input={
                     "prompt": prompt,
-                    "max_tokens": 100,  # Título é curto
-                    "temperature": 0.3,  # Baixa criatividade (queremos consistência)
-                    "top_p": 0.9
+                    "max_output_tokens": 150,  # Título é curto, mas Gemini usa max_output_tokens
+                    "temperature": 0.5,  # Baixa criatividade (queremos consistência)
+                    "top_p": 0.9,
+                    "thinking_level": "medium"  # Raciocínio moderado (suficiente para títulos)
                 }
             )
 
