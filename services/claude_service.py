@@ -664,17 +664,17 @@ Tags principais: {tags_str}
 
 **RETORNE APENAS O TÍTULO (sem explicações):**"""
 
-            logger.info("🏷️ Gerando smart_title com Gemini 3 Pro...")
+            logger.info("🏷️ Gerando smart_title com Gemini 2.5 Flash...")
 
-            # Chamar Gemini 3 Pro (usa mesmo cliente/modelo do ClaudeService)
+            # Chamar Gemini 2.5 Flash (modelo LEVE, otimizado para tarefas rápidas)
+            # NÃO usar Gemini 3 Pro aqui (consome muita RAM no Render)
             output = self.client.run(
-                self.model_version,  # "google/gemini-3-pro"
+                "google/gemini-2.5-flash-exp:latest",  # Modelo leve (< 100MB RAM)
                 input={
                     "prompt": prompt,
-                    "max_output_tokens": 150,  # Título é curto, mas Gemini usa max_output_tokens
-                    "temperature": 0.5,  # Baixa criatividade (queremos consistência)
-                    "top_p": 0.9,
-                    "thinking_level": "medium"  # Raciocínio moderado (suficiente para títulos)
+                    "max_output_tokens": 150,  # Título é curto
+                    "temperature": 0.5,  # Baixa criatividade (consistência)
+                    "top_p": 0.9
                 }
             )
 
