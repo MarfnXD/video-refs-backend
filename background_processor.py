@@ -210,6 +210,32 @@ async def process_bookmark_background(
                 # Não bloqueia - continua sem IA
 
         # ============================================================
+        # PASSO 4.5: Gerar Smart Title (título otimizado para recuperação)
+        # ============================================================
+        smart_title = None
+        if auto_description or auto_tags:  # Só gera se Claude rodou com sucesso
+            try:
+                logger.info(f"🏷️ Gerando smart title com Gemini 2.5 Flash...")
+
+                # Buscar visual_analysis se existir
+                visual_analysis = gemini_analysis.get('visual_analysis', None) if gemini_analysis else None
+
+                smart_title = await claude_service.generate_smart_title(
+                    auto_description=auto_description or "",
+                    auto_tags=auto_tags or [],
+                    user_context=user_context,
+                    visual_analysis=visual_analysis
+                )
+
+                if smart_title:
+                    logger.info(f"✅ Smart title gerado: {smart_title[:60]}")
+                else:
+                    logger.warning("⚠️ Smart title retornou None - usando título original")
+            except Exception as e:
+                logger.warning(f"⚠️ Erro ao gerar smart title (não crítico): {str(e)[:50]}")
+                smart_title = None
+
+        # ============================================================
         # PASSO 5: Atualizar Supabase com TUDO
         # ============================================================
         logger.info(f"💾 Salvando tudo no Supabase...")
@@ -257,6 +283,10 @@ async def process_bookmark_background(
             update_data['auto_tags'] = auto_tags
         if auto_categories:
             update_data['auto_categories'] = auto_categories
+
+        # Adicionar smart_title se foi gerado
+        if smart_title:
+            update_data['smart_title'] = smart_title
 
         # UPDATE no Supabase
         supabase.table('bookmarks').update(update_data).eq('id', bookmark_id).execute()
