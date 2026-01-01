@@ -63,16 +63,40 @@ class VideoStorageService:
             temp_path = temp_file.name
             temp_file.close()
 
-            # 2. Baixar vídeo
-            async with httpx.AsyncClient(timeout=300.0) as client:  # 5 min timeout
-                async with client.stream('GET', video_url) as response:
-                    response.raise_for_status()
+            # 2. Baixar vídeo (com retry para conexões instáveis)
+            max_retries = 3
+            retry_count = 0
+            total_size = 0
 
-                    total_size = 0
-                    with open(temp_path, 'wb') as f:
-                        async for chunk in response.aiter_bytes(chunk_size=8192):
-                            f.write(chunk)
-                            total_size += len(chunk)
+            while retry_count < max_retries:
+                try:
+                    async with httpx.AsyncClient(
+                        timeout=httpx.Timeout(300.0, connect=60.0),  # 5min total, 60s connect
+                        limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+                        follow_redirects=True
+                    ) as client:
+                        async with client.stream('GET', video_url) as response:
+                            response.raise_for_status()
+
+                            total_size = 0
+                            with open(temp_path, 'wb') as f:
+                                async for chunk in response.aiter_bytes(chunk_size=65536):  # 64KB chunks (maior = mais rápido)
+                                    f.write(chunk)
+                                    total_size += len(chunk)
+
+                    # Se chegou aqui, download completo
+                    break
+
+                except (httpx.RemoteProtocolError, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
+                    retry_count += 1
+                    if retry_count >= max_retries:
+                        logger.error(f"❌ Falha após {max_retries} tentativas: {str(e)}")
+                        raise
+
+                    import asyncio
+                    wait_time = 2 ** retry_count  # Backoff exponencial: 2s, 4s, 8s
+                    logger.warning(f"⚠️ Erro no download (tentativa {retry_count}/{max_retries}), aguardando {wait_time}s...")
+                    await asyncio.sleep(wait_time)
 
             file_size_mb = total_size / (1024 * 1024)
             logger.info(f"✅ Vídeo baixado: {file_size_mb:.2f} MB")
