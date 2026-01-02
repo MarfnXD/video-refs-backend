@@ -15,18 +15,20 @@ from services.apify_service import ApifyService
 from services.claude_service import claude_service
 from services.gemini_service import GeminiService
 from services.video_storage_service import VideoStorageService
+from services.thumbnail_service import ThumbnailService
 
 logger = logging.getLogger(__name__)
+
+# Supabase client (inicializar primeiro)
+supabase_url = os.getenv("SUPABASE_URL")
+supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+supabase: Client = create_client(supabase_url, supabase_key)
 
 # Inicializar services
 apify_service = ApifyService()
 gemini_service = GeminiService()
 video_storage_service = VideoStorageService()
-
-# Supabase client
-supabase_url = os.getenv("SUPABASE_URL")
-supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-supabase: Client = create_client(supabase_url, supabase_key)
+thumbnail_service = ThumbnailService(supabase_client=supabase)
 
 
 async def process_bookmark_background(
@@ -230,10 +232,31 @@ async def process_bookmark_background(
             update_data['title'] = metadata.get('title')
             update_data['original_title'] = metadata.get('title')  # Preserva título original
             update_data['platform'] = metadata.get('platform')
-            update_data['thumbnail'] = metadata.get('thumbnail_url')  # URL da thumbnail
-            update_data['cloud_thumbnail_url'] = metadata.get('thumbnail_url')  # URL permanente da thumbnail no Supabase Storage (Apify já faz upload)
+            update_data['thumbnail'] = metadata.get('thumbnail_url')  # URL original da thumbnail (Instagram)
             update_data['published_at'] = metadata.get('published_at')  # Data de publicação
             update_data['metadata'] = metadata  # JSON completo com TODOS os campos
+
+            # Upload da thumbnail para Supabase Storage
+            instagram_thumbnail_url = metadata.get('thumbnail_url')
+            if instagram_thumbnail_url:
+                try:
+                    logger.info(f"📸 Fazendo upload da thumbnail para Supabase Storage...")
+                    cloud_thumbnail_url = await thumbnail_service.upload_thumbnail(
+                        thumbnail_url=instagram_thumbnail_url,
+                        user_id=user_id,
+                        bookmark_id=bookmark_id
+                    )
+                    if cloud_thumbnail_url:
+                        update_data['cloud_thumbnail_url'] = cloud_thumbnail_url
+                        logger.info(f"✅ Thumbnail salva no cloud: {cloud_thumbnail_url[:60]}...")
+                    else:
+                        # Fallback: usar URL do Instagram se upload falhar
+                        update_data['cloud_thumbnail_url'] = instagram_thumbnail_url
+                        logger.warning(f"⚠️  Upload falhou, usando URL do Instagram")
+                except Exception as e:
+                    logger.error(f"❌ Erro ao fazer upload da thumbnail: {str(e)}")
+                    # Fallback: usar URL do Instagram
+                    update_data['cloud_thumbnail_url'] = instagram_thumbnail_url
 
         # Adicionar cloud_video_url se fez upload
         if cloud_video_url:
