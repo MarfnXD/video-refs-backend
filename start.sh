@@ -5,9 +5,12 @@
 
 echo "🚀 Iniciando todos os serviços..."
 
+# FORÇAR concurrency=2 (alguma env var oculta do Render seta 4)
+export CELERYD_CONCURRENCY=2
+
 # Iniciar Celery Worker em background
-# Concurrency controlado via celery_app.py (worker_concurrency=2)
-echo "⚙️ Iniciando Celery Worker (config via Python)..."
+# Concurrency controlado via CELERYD_CONCURRENCY=2
+echo "⚙️ Iniciando Celery Worker (CELERYD_CONCURRENCY=2)..."
 celery -A celery_app worker --loglevel=info &
 
 # Iniciar Celery Beat em background (cron jobs)
