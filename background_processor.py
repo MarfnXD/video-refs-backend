@@ -234,7 +234,12 @@ async def process_bookmark_background(
             update_data['original_title'] = metadata.get('title')  # Preserva título original
             update_data['platform'] = metadata.get('platform')
             update_data['thumbnail'] = metadata.get('thumbnail_url')  # URL original da thumbnail (Instagram)
-            update_data['published_at'] = metadata.get('published_at')  # Data de publicação
+
+            # Só adiciona published_at se tiver valor válido
+            published_at = metadata.get('published_at')
+            if published_at and published_at != '':
+                update_data['published_at'] = published_at
+
             update_data['metadata'] = metadata  # JSON completo com TODOS os campos
 
             # Upload da thumbnail para Supabase Storage
