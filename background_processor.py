@@ -173,6 +173,7 @@ async def process_bookmark_background(
         auto_description = None
         auto_tags = []
         auto_categories = []
+        smart_title = None
         confidence = None
         relevance_score = None
 
