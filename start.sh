@@ -6,8 +6,9 @@
 echo "🚀 Iniciando todos os serviços..."
 
 # Iniciar Celery Worker em background
-echo "⚙️ Iniciando Celery Worker..."
-celery -A celery_app worker --loglevel=info --concurrency=4 &
+# RENDER FREE: 512MB RAM = 1 worker máximo (evita crash de memória)
+echo "⚙️ Iniciando Celery Worker (1 worker - otimizado para 512MB RAM)..."
+celery -A celery_app worker --loglevel=info --concurrency=1 &
 
 # Iniciar Celery Beat em background (cron jobs)
 echo "⏰ Iniciando Celery Beat..."
