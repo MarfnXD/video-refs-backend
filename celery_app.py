@@ -12,6 +12,10 @@ load_dotenv()
 # Redis URL (local: redis://localhost:6379/0, produção: env var)
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
+# FORÇAR concurrency via env var (override qualquer outra config)
+# Se houver CELERYD_CONCURRENCY no sistema, este valor sobrescreve
+os.environ['CELERYD_CONCURRENCY'] = '2'
+
 # Criar app Celery
 celery_app = Celery(
     "video_refs_workers",
