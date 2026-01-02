@@ -6,9 +6,9 @@
 echo "🚀 Iniciando todos os serviços..."
 
 # Iniciar Celery Worker em background
-# RENDER FREE: 512MB RAM = 2 workers (teste de performance)
-echo "⚙️ Iniciando Celery Worker (2 workers - teste de performance)..."
-celery -A celery_app worker --loglevel=info --concurrency=2 &
+# Concurrency controlado via celery_app.py (worker_concurrency=2)
+echo "⚙️ Iniciando Celery Worker (config via Python)..."
+celery -A celery_app worker --loglevel=info &
 
 # Iniciar Celery Beat em background (cron jobs)
 echo "⏰ Iniciando Celery Beat..."

@@ -43,8 +43,8 @@ celery_app.conf.update(
     task_soft_time_limit=540,  # Aviso 1 min antes do hard limit
 
     # Concorrência (quantos workers paralelos)
-    # Render Free: 512MB RAM = 1 worker (evita crash por falta de memória)
-    worker_concurrency=1,
+    # Render Free: 512MB RAM = 2 workers (teste de performance)
+    worker_concurrency=2,
     worker_prefetch_multiplier=1,  # Pega 1 task por vez (evita sobrecarga)
 
     # Logs
