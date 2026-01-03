@@ -21,6 +21,7 @@ from services.apify_service import ApifyService
 from services.gemini_service import gemini_service
 from services.claude_service import claude_service
 from services.thumbnail_service import ThumbnailService
+from services.embedding_service import embedding_service
 from supabase import create_client, Client
 
 logger = logging.getLogger(__name__)
@@ -138,7 +139,11 @@ def process_bookmark_complete_task(
             if process_ai:
                 workflow |= process_claude_task.s(bookmark_id, user_id)
 
-            # 5. Cleanup final (sempre roda)
+            # 5. Gerar embedding (sempre roda após processamento IA)
+            if process_ai:
+                workflow |= generate_embedding_task.s(bookmark_id, user_id)
+
+            # 6. Cleanup final (sempre roda)
             workflow |= cleanup_and_notify_task.s(bookmark_id, user_id)
 
             # Executar workflow
@@ -162,6 +167,7 @@ def process_bookmark_complete_task(
             pipeline_config.append("Gemini:✓")
         if process_ai:
             pipeline_config.append("Gemini Pro:✓")
+            pipeline_config.append("Embedding:✓")
 
         logger.info(
             f"✅ [PIPELINE] {bookmark_id} - CRIADO | "
@@ -225,7 +231,7 @@ def extract_metadata_task(self, bookmark_id: str, url: str, user_id: str):
             'original_title': metadata.title,  # Imutável
             'platform': metadata.platform.value if hasattr(metadata.platform, 'value') else str(metadata.platform),
             'thumbnail_url': metadata.thumbnail_url,
-            'metadata': metadata.to_dict(),  # JSON completo
+            'metadata': metadata.dict(),  # JSON completo (Pydantic v1)
         }
 
         # Adicionar cloud_thumbnail_url se disponível
@@ -664,6 +670,73 @@ def upload_to_cloud_task(self, previous_result: dict, bookmark_id: str, user_id:
                 logger.info(f"🗑️ Vídeo temporário deletado: {temp_video_path}")
             except:
                 pass
+
+
+@celery_app.task(bind=True, name="tasks.generate_embedding_task", max_retries=2, time_limit=60)
+def generate_embedding_task(self, previous_result: dict, bookmark_id: str, user_id: str):
+    """
+    FASE 3.4: Gerar embedding semântico
+    - Combina smart_title + auto_tags + auto_categories + transcription + multimodal_analysis
+    - Gera vetor de 768 dimensões via Gemini Embedding API
+    - Salva no Supabase (coluna embedding)
+    """
+    timer = TaskTimer("EMBEDDING", bookmark_id)
+    timer.start()
+
+    try:
+        # 1. Buscar dados do bookmark no Supabase
+        logger.debug(f"Buscando dados do bookmark para embedding...")
+
+        response = supabase_client.table('bookmarks').select(
+            'smart_title, auto_tags, auto_categories, video_transcript, visual_analysis'
+        ).eq('id', bookmark_id).single().execute()
+
+        if not response.data:
+            raise Exception("Bookmark não encontrado no Supabase")
+
+        bookmark = response.data
+
+        # 2. Gerar embedding
+        logger.info(f"📊 Gerando embedding...")
+
+        embedding = embedding_service.generate_from_bookmark_dict(bookmark)
+
+        if not embedding:
+            raise Exception("Embedding service retornou None")
+
+        # 3. Salvar no Supabase
+        supabase_client.table('bookmarks').update({
+            'embedding': embedding
+        }).eq('id', bookmark_id).execute()
+
+        # Log consolidado de sucesso
+        timer.success(
+            Dimensões=len(embedding),
+            Campos=f"SmartTitle={'✓' if bookmark.get('smart_title') else '✗'} Tags={len(bookmark.get('auto_tags', []))}"
+        )
+
+        # 4. Retornar dados para próxima task
+        return {
+            **previous_result,
+            "embedding_generated": True,
+            "embedding_dimensions": len(embedding)
+        }
+
+    except Exception as e:
+        timer.error(f"Embedding: {str(e)[:60]}")
+
+        # Retry se for erro temporário
+        if "timeout" in str(e).lower() or "rate limit" in str(e).lower():
+            logger.warning(f"⚠️ Retry após 30s (timeout/rate limit)")
+            raise self.retry(exc=e, countdown=30)
+
+        # Não falhar o bookmark inteiro se embedding falhar
+        logger.warning(f"⚠️ Embedding falhou (não crítico) - continuando pipeline")
+        return {
+            **previous_result,
+            "embedding_generated": False,
+            "embedding_error": str(e)[:100]
+        }
 
 
 @celery_app.task(bind=True, name="tasks.cleanup_and_notify_task")
