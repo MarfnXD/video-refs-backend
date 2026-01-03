@@ -25,8 +25,7 @@ class VideoMetadata(BaseModel):
     likes: Optional[int] = None
     comments_count: Optional[int] = None
     top_comments: List[Comment] = []
-    thumbnail_url: Optional[str] = None
-    cloud_thumbnail_url: Optional[str] = None  # URL permanente no Supabase Storage
+    thumbnail_url: Optional[str] = None  # URL original da plataforma (Instagram/TikTok/YouTube CDN)
     duration: Optional[str] = None
     author: Optional[str] = None
     author_url: Optional[str] = None

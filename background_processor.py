@@ -83,7 +83,6 @@ async def process_bookmark_background(
                         'title': video_metadata.title,
                         'description': video_metadata.description,
                         'thumbnail_url': video_metadata.thumbnail_url,
-                        'cloud_thumbnail_url': video_metadata.cloud_thumbnail_url,
                         'duration': video_metadata.duration,
                         'views': video_metadata.views,
                         'likes': video_metadata.likes,

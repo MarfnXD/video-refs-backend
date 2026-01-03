@@ -410,18 +410,9 @@ class ApifyService:
             caption = data.get("caption", "Instagram Reel")
             hashtags = re.findall(r"#\w+", caption)
 
-            # Thumbnail temporária do Apify
-            temp_thumbnail_url = data.get("displayUrl", "")
-
-            # Upload para Supabase Storage (permanente) com proteção
-            final_thumbnail_url = temp_thumbnail_url
-            try:
-                if temp_thumbnail_url:
-                    permanent_thumbnail = await storage_service.upload_thumbnail(temp_thumbnail_url, url)
-                    if permanent_thumbnail:
-                        final_thumbnail_url = permanent_thumbnail
-            except Exception:
-                pass  # Usa thumbnail temporária se upload falhar
+            # Thumbnail original do Instagram (CDN)
+            # IMPORTANTE: Não fazer upload aqui - o background_processor faz depois
+            thumbnail_url = data.get("displayUrl", "")
 
             metadata = VideoMetadata(
                 url=url,
@@ -433,7 +424,7 @@ class ApifyService:
                 likes=data.get("likesCount", 0),
                 comments_count=data.get("commentsCount", 0),
                 top_comments=top_comments,
-                thumbnail_url=final_thumbnail_url,
+                thumbnail_url=thumbnail_url,
                 duration=str(data.get("videoDuration", "")) if data.get("videoDuration") else "",
                 author=data.get("ownerUsername", "Unknown"),
                 author_url=f"https://www.instagram.com/{data.get('ownerUsername', '')}" if data.get('ownerUsername') else "",
