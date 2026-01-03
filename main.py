@@ -1278,6 +1278,42 @@ async def process_bookmark_complete(
         )
 
 
+# ============================================================================
+# ENDPOINT DE DIAGNÓSTICO: Verificar versão do código
+# ============================================================================
+
+@app.get("/api/debug/code-version")
+async def debug_code_version():
+    """
+    Endpoint para verificar se o código corrigido está deployado.
+    Verifica se o upload duplo de thumbnail foi removido do apify_service.py
+    """
+    import inspect
+
+    # Ler código-fonte do método extract_instagram_reel
+    source_code = inspect.getsource(apify_service.extract_instagram_reel)
+
+    # Verificar se tem o upload duplo (bug)
+    has_bug = "storage_service.upload_thumbnail" in source_code and "extract_instagram_reel" in source_code
+
+    # Verificar se tem o comentário da correção
+    has_fix_comment = "Não fazer upload aqui - o background_processor faz depois" in source_code
+
+    # Pegar hash do arquivo para identificar versão
+    import hashlib
+    code_hash = hashlib.md5(source_code.encode()).hexdigest()[:8]
+
+    return {
+        "service": "apify_service.extract_instagram_reel",
+        "has_double_upload_bug": has_bug,
+        "has_fix_comment": has_fix_comment,
+        "code_hash": code_hash,
+        "status": "FIXED" if has_fix_comment and not has_bug else "BUGGY",
+        "message": "Código corrigido deployado" if has_fix_comment and not has_bug else "ATENÇÃO: Código bugado ainda em produção!",
+        "snippet": source_code[400:600] if len(source_code) > 400 else source_code[:200]
+    }
+
+
 @app.on_event("shutdown")
 async def shutdown_event():
     await apify_service.close()
