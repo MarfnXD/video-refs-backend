@@ -239,29 +239,50 @@ async def process_bookmark_background(
             if published_at and published_at != '':
                 update_data['published_at'] = published_at
 
-            update_data['metadata'] = metadata  # JSON completo com TODOS os campos
+            # 🔍 LOG CRÍTICO: Verificar metadata ANTES de salvar
+            logger.info(f"🔍 [BACKGROUND_PROCESSOR] METADATA ANTES DE UPLOAD:")
+            logger.info(f"   metadata['thumbnail_url']: {metadata.get('thumbnail_url', 'NULL')[:80] if metadata.get('thumbnail_url') else 'NULL'}...")
+            logger.info(f"   metadata dict completo: {str(metadata)[:200]}...")
 
             # Upload da thumbnail para Supabase Storage
             instagram_thumbnail_url = metadata.get('thumbnail_url')
             if instagram_thumbnail_url:
                 try:
-                    logger.info(f"📸 Fazendo upload da thumbnail para Supabase Storage...")
+                    logger.info(f"📸 [BACKGROUND_PROCESSOR] Chamando ThumbnailService.upload_thumbnail()")
+                    logger.info(f"   - thumbnail_url (Instagram CDN): {instagram_thumbnail_url[:80]}...")
+                    logger.info(f"   - user_id: {user_id}")
+                    logger.info(f"   - bookmark_id: {bookmark_id}")
+
                     cloud_thumbnail_url = await thumbnail_service.upload_thumbnail(
                         thumbnail_url=instagram_thumbnail_url,
                         user_id=user_id,
                         bookmark_id=bookmark_id
                     )
+
                     if cloud_thumbnail_url:
                         update_data['cloud_thumbnail_url'] = cloud_thumbnail_url
-                        logger.info(f"✅ Thumbnail salva no cloud: {cloud_thumbnail_url[:60]}...")
+                        logger.info(f"✅ [BACKGROUND_PROCESSOR] Upload OK → cloud_thumbnail_url: {cloud_thumbnail_url[:80]}...")
                     else:
                         # Fallback: usar URL do Instagram se upload falhar
                         update_data['cloud_thumbnail_url'] = instagram_thumbnail_url
-                        logger.warning(f"⚠️  Upload falhou, usando URL do Instagram")
+                        logger.warning(f"⚠️  [BACKGROUND_PROCESSOR] Upload retornou None, usando URL do Instagram")
                 except Exception as e:
-                    logger.error(f"❌ Erro ao fazer upload da thumbnail: {str(e)}")
+                    logger.error(f"❌ [BACKGROUND_PROCESSOR] Erro ao fazer upload da thumbnail: {str(e)}")
                     # Fallback: usar URL do Instagram
                     update_data['cloud_thumbnail_url'] = instagram_thumbnail_url
+
+            # 🔍 LOG CRÍTICO: Verificar metadata DEPOIS de upload
+            logger.info(f"🔍 [BACKGROUND_PROCESSOR] METADATA DEPOIS DE UPLOAD:")
+            logger.info(f"   metadata['thumbnail_url']: {metadata.get('thumbnail_url', 'NULL')[:80] if metadata.get('thumbnail_url') else 'NULL'}...")
+
+            # AGORA adiciona metadata ao update_data (DEPOIS de logs)
+            update_data['metadata'] = metadata  # JSON completo com TODOS os campos
+
+            # 🔍 LOG CRÍTICO: Verificar o que vai ser salvo
+            logger.info(f"💾 [BACKGROUND_PROCESSOR] DADOS QUE SERÃO SALVOS:")
+            logger.info(f"   update_data['thumbnail']: {update_data.get('thumbnail', 'NULL')[:80] if update_data.get('thumbnail') else 'NULL'}...")
+            logger.info(f"   update_data['cloud_thumbnail_url']: {update_data.get('cloud_thumbnail_url', 'NULL')[:80] if update_data.get('cloud_thumbnail_url') else 'NULL'}...")
+            logger.info(f"   update_data['metadata']['thumbnail_url']: {update_data['metadata'].get('thumbnail_url', 'NULL')[:80] if update_data.get('metadata', {}).get('thumbnail_url') else 'NULL'}...")
 
         # Adicionar cloud_video_url se fez upload
         if cloud_video_url:
