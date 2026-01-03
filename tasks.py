@@ -215,6 +215,11 @@ def extract_metadata_task(self, bookmark_id: str, url: str, user_id: str):
         cloud_thumbnail_url = None
         if metadata.thumbnail_url and thumbnail_service:
             try:
+                logger.info(f"📸 [TASKS.PY] Chamando ThumbnailService.upload_thumbnail()")
+                logger.info(f"   - thumbnail_url (Instagram CDN): {metadata.thumbnail_url[:80]}...")
+                logger.info(f"   - user_id: {user_id}")
+                logger.info(f"   - bookmark_id: {bookmark_id}")
+
                 cloud_thumbnail_url = loop.run_until_complete(
                     thumbnail_service.upload_thumbnail(
                         metadata.thumbnail_url,
@@ -222,16 +227,29 @@ def extract_metadata_task(self, bookmark_id: str, url: str, user_id: str):
                         bookmark_id
                     )
                 )
+
+                if cloud_thumbnail_url:
+                    logger.info(f"✅ [TASKS.PY] Upload OK → cloud_thumbnail_url: {cloud_thumbnail_url[:80]}...")
+                else:
+                    logger.warning(f"⚠️ [TASKS.PY] Upload retornou None")
             except Exception as e:
                 logger.warning(f"⚠️ Thumbnail upload falhou (não crítico): {str(e)[:50]}")
 
         # 3. Salvar metadados no Supabase
+        metadata_dict = metadata.dict()
+
+        # 🔍 LOG CRÍTICO: Verificar se metadata.thumbnail_url está correto
+        logger.info(f"🔍 [TASKS.PY] ANTES DE SALVAR:")
+        logger.info(f"   metadata.thumbnail_url (objeto): {metadata.thumbnail_url[:80] if metadata.thumbnail_url else 'NULL'}...")
+        logger.info(f"   metadata.dict()['thumbnail_url']: {metadata_dict.get('thumbnail_url', 'NULL')[:80] if metadata_dict.get('thumbnail_url') else 'NULL'}...")
+        logger.info(f"   cloud_thumbnail_url: {cloud_thumbnail_url[:80] if cloud_thumbnail_url else 'NULL'}...")
+
         update_data = {
             'title': metadata.title,
             'original_title': metadata.title,  # Imutável
             'platform': metadata.platform.value if hasattr(metadata.platform, 'value') else str(metadata.platform),
             'thumbnail_url': metadata.thumbnail_url,
-            'metadata': metadata.dict(),  # JSON completo (Pydantic v1)
+            'metadata': metadata_dict,  # JSON completo (Pydantic v1)
         }
 
         # Adicionar cloud_thumbnail_url se disponível
@@ -244,6 +262,10 @@ def extract_metadata_task(self, bookmark_id: str, url: str, user_id: str):
 
         # Update no database
         supabase_client.table('bookmarks').update(update_data).eq('id', bookmark_id).execute()
+
+        # 🔍 LOG CRÍTICO: Verificar o que foi salvo
+        logger.info(f"💾 [TASKS.PY] SALVO NO BANCO:")
+        logger.info(f"   update_data['metadata']['thumbnail_url']: {update_data['metadata'].get('thumbnail_url', 'NULL')[:80] if update_data['metadata'].get('thumbnail_url') else 'NULL'}...")
 
         # Log consolidado de sucesso
         timer.success(

@@ -62,21 +62,24 @@ class StorageService:
 
         return f"{hash_str}{ext}"
 
-    async def upload_thumbnail(
+    async def _old_upload_thumbnail_DEPRECATED(
         self,
         thumbnail_url: str,
         video_url: str
     ) -> Optional[str]:
         """
-        Faz download de uma thumbnail e faz upload no Supabase Storage.
+        ⚠️ DEPRECATED: NÃO USE ESTE MÉTODO!
 
-        Args:
-            thumbnail_url: URL temporária da thumbnail
-            video_url: URL do vídeo (para gerar nome único)
+        Este método está obsoleto e gera paths incorretos.
+        Use ThumbnailService.upload_thumbnail() em vez disso.
 
-        Returns:
-            URL permanente da thumbnail no Supabase Storage ou None se falhar
+        Mantido apenas para referência histórica.
         """
+        raise RuntimeError(
+            "❌ ERRO: upload_thumbnail() do StorageService está DEPRECATED!\n"
+            "Use ThumbnailService.upload_thumbnail(thumbnail_url, user_id, bookmark_id) em vez disso.\n"
+            "Este método antigo gera paths incorretos que causam corrupção de metadata."
+        )
         try:
             # Gerar nome de arquivo único
             filename = self._generate_filename(thumbnail_url, video_url)
