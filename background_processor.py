@@ -244,14 +244,11 @@ async def process_bookmark_background(
             logger.info(f"   metadata['thumbnail_url']: {metadata.get('thumbnail_url', 'NULL')[:80] if metadata.get('thumbnail_url') else 'NULL'}...")
             logger.info(f"   metadata dict completo: {str(metadata)[:200]}...")
 
-            # Upload da thumbnail para Supabase Storage
+            # Upload da thumbnail para Supabase Storage (com retry automático)
             instagram_thumbnail_url = metadata.get('thumbnail_url')
             if instagram_thumbnail_url:
                 try:
-                    logger.info(f"📸 [BACKGROUND_PROCESSOR] Chamando ThumbnailService.upload_thumbnail()")
-                    logger.info(f"   - thumbnail_url (Instagram CDN): {instagram_thumbnail_url[:80]}...")
-                    logger.info(f"   - user_id: {user_id}")
-                    logger.info(f"   - bookmark_id: {bookmark_id}")
+                    logger.info(f"📸 [{bookmark_id[:8]}] Upload thumbnail: {instagram_thumbnail_url[:60]}...")
 
                     cloud_thumbnail_url = await thumbnail_service.upload_thumbnail(
                         thumbnail_url=instagram_thumbnail_url,
@@ -261,15 +258,13 @@ async def process_bookmark_background(
 
                     if cloud_thumbnail_url:
                         update_data['cloud_thumbnail_url'] = cloud_thumbnail_url
-                        logger.info(f"✅ [BACKGROUND_PROCESSOR] Upload OK → cloud_thumbnail_url: {cloud_thumbnail_url[:80]}...")
+                        logger.info(f"✅ [{bookmark_id[:8]}] Thumbnail salva no Supabase Storage")
                     else:
-                        # Fallback: usar URL do Instagram se upload falhar
-                        update_data['cloud_thumbnail_url'] = instagram_thumbnail_url
-                        logger.warning(f"⚠️  [BACKGROUND_PROCESSOR] Upload retornou None, usando URL do Instagram")
+                        # Não usar fallback - melhor NULL que URL que vai expirar
+                        logger.warning(f"⚠️ [{bookmark_id[:8]}] Thumbnail não salva (falhou após retries)")
                 except Exception as e:
-                    logger.error(f"❌ [BACKGROUND_PROCESSOR] Erro ao fazer upload da thumbnail: {str(e)}")
-                    # Fallback: usar URL do Instagram
-                    update_data['cloud_thumbnail_url'] = instagram_thumbnail_url
+                    # Não usar fallback - melhor NULL que URL que vai expirar
+                    logger.error(f"❌ [{bookmark_id[:8]}] Erro no upload thumbnail: {str(e)[:80]}")
 
             # 🔍 LOG CRÍTICO: Verificar metadata DEPOIS de upload
             logger.info(f"🔍 [BACKGROUND_PROCESSOR] METADATA DEPOIS DE UPLOAD:")
