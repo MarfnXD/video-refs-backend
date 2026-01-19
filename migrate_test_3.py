@@ -22,7 +22,7 @@ BACKEND_URL = 'https://video-refs-backend.onrender.com'
 USER_ID = '0ed9bb40-0041-4dca-9649-256cb418f403'
 CSV_PATH = 'instagram_urls_migrated_20251226_214730.csv'
 
-LIMIT = 5  # ⚠️ TESTE: apenas 5 vídeos
+LIMIT = 10  # ⚠️ TESTE: apenas 10 vídeos
 
 # Ler CSV e pegar não migrados
 print("📄 Lendo CSV...")

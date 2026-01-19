@@ -9,6 +9,7 @@ Funciona para até ~100 usuários, ~1000 vídeos/dia.
 
 import os
 import logging
+import asyncio
 from typing import Optional
 from supabase import create_client, Client
 from services.apify_service import ApifyService
@@ -274,8 +275,23 @@ async def process_bookmark_background(
                         update_data['cloud_thumbnail_url'] = cloud_thumbnail_url
                         logger.info(f"✅ [{bookmark_id[:8]}] Thumbnail salva no Supabase Storage")
                     else:
-                        # Não usar fallback - melhor NULL que URL que vai expirar
-                        logger.warning(f"⚠️ [{bookmark_id[:8]}] Thumbnail não salva (falhou após retries)")
+                        # Retry final com delay maior (worker pode estar inicializando)
+                        logger.warning(f"⚠️ [{bookmark_id[:8]}] Primeiro upload falhou, aguardando 5s para retry final...")
+                        await asyncio.sleep(5)
+
+                        try:
+                            cloud_thumbnail_url = await thumbnail_service.upload_thumbnail(
+                                thumbnail_url=instagram_thumbnail_url,
+                                user_id=user_id,
+                                bookmark_id=bookmark_id
+                            )
+                            if cloud_thumbnail_url:
+                                update_data['cloud_thumbnail_url'] = cloud_thumbnail_url
+                                logger.info(f"✅ [{bookmark_id[:8]}] Thumbnail salva no RETRY FINAL")
+                            else:
+                                logger.error(f"❌ [{bookmark_id[:8]}] Thumbnail falhou mesmo após retry final")
+                        except Exception as retry_error:
+                            logger.error(f"❌ [{bookmark_id[:8]}] Erro no retry final: {str(retry_error)[:80]}")
                 except Exception as e:
                     # Não usar fallback - melhor NULL que URL que vai expirar
                     logger.error(f"❌ [{bookmark_id[:8]}] Erro no upload thumbnail: {str(e)[:80]}")
