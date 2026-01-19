@@ -16,6 +16,8 @@ Melhorias v2:
 import httpx
 import asyncio
 import logging
+import subprocess
+import tempfile
 from typing import Optional, Dict
 from supabase import Client
 import os
@@ -178,3 +180,123 @@ class ThumbnailService:
         except Exception as e:
             logger.error(f"❌ Erro ao deletar thumbnail: {str(e)}")
             return False
+
+    async def extract_frame_as_thumbnail(
+        self,
+        video_path: str,
+        user_id: str,
+        bookmark_id: str,
+        timestamp_seconds: float = 2.0
+    ) -> Optional[str]:
+        """
+        Extrai um frame do vídeo e faz upload como thumbnail (fallback).
+
+        Usado quando a thumbnail original do Instagram/TikTok falha.
+
+        Args:
+            video_path: Caminho local do vídeo já baixado
+            user_id: ID do usuário
+            bookmark_id: ID do bookmark
+            timestamp_seconds: Segundo do vídeo para extrair (default: 2.0 para evitar fades)
+
+        Returns:
+            URL da thumbnail no Supabase Storage ou None se falhar
+        """
+        temp_frame_path = None
+
+        try:
+            logger.info(f"🎬 [{bookmark_id[:8]}] Extraindo frame do segundo {timestamp_seconds} como thumbnail fallback...")
+
+            # Verificar se arquivo existe
+            if not os.path.exists(video_path):
+                logger.error(f"❌ [{bookmark_id[:8]}] Vídeo não encontrado: {video_path}")
+                return None
+
+            # Criar arquivo temporário para o frame
+            temp_frame_path = tempfile.mktemp(suffix=".jpg")
+
+            # Usar ffmpeg para extrair frame
+            # -ss: seek para o timestamp
+            # -vframes 1: extrair apenas 1 frame
+            # -q:v 2: qualidade alta (1-31, menor = melhor)
+            cmd = [
+                "ffmpeg",
+                "-ss", str(timestamp_seconds),
+                "-i", video_path,
+                "-vframes", "1",
+                "-q:v", "2",
+                "-y",  # Sobrescrever se existir
+                temp_frame_path
+            ]
+
+            # Executar ffmpeg
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            if result.returncode != 0:
+                logger.error(f"❌ [{bookmark_id[:8]}] ffmpeg falhou: {result.stderr[:200]}")
+                return None
+
+            # Verificar se frame foi criado
+            if not os.path.exists(temp_frame_path):
+                logger.error(f"❌ [{bookmark_id[:8]}] Frame não foi criado")
+                return None
+
+            frame_size = os.path.getsize(temp_frame_path)
+            logger.info(f"✅ [{bookmark_id[:8]}] Frame extraído: {frame_size / 1024:.1f}KB")
+
+            # Ler bytes do frame
+            with open(temp_frame_path, "rb") as f:
+                image_bytes = f.read()
+
+            # Upload para Supabase Storage
+            cloud_path = f"{user_id}/thumbnails/{bookmark_id}.jpg"
+            content_type = "image/jpeg"
+
+            logger.info(f"☁️ [{bookmark_id[:8]}] Upload do frame para Supabase...")
+
+            await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: self.supabase.storage.from_(self.bucket_name).upload(
+                        path=cloud_path,
+                        file=image_bytes,
+                        file_options={"content-type": content_type, "upsert": "true"}
+                    )
+                ),
+                timeout=UPLOAD_TIMEOUT
+            )
+
+            logger.info(f"✅ [{bookmark_id[:8]}] Frame uploaded: {cloud_path}")
+
+            # Gerar signed URL
+            signed_url = self.supabase.storage.from_(self.bucket_name).create_signed_url(
+                path=cloud_path,
+                expires_in=31536000  # 1 ano
+            )
+
+            if signed_url and "signedURL" in signed_url:
+                final_url = signed_url["signedURL"]
+                logger.info(f"✅ [{bookmark_id[:8]}] Thumbnail fallback OK: {final_url[:60]}...")
+                return final_url
+            else:
+                logger.error(f"❌ [{bookmark_id[:8]}] Falha ao gerar signed URL do frame")
+                return None
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"❌ [{bookmark_id[:8]}] Timeout ao extrair frame com ffmpeg")
+            return None
+        except Exception as e:
+            logger.error(f"❌ [{bookmark_id[:8]}] Erro ao extrair frame: {str(e)[:100]}")
+            return None
+        finally:
+            # Limpar arquivo temporário
+            if temp_frame_path and os.path.exists(temp_frame_path):
+                try:
+                    os.remove(temp_frame_path)
+                except:
+                    pass

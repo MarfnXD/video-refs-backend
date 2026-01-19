@@ -289,12 +289,41 @@ async def process_bookmark_background(
                                 update_data['cloud_thumbnail_url'] = cloud_thumbnail_url
                                 logger.info(f"✅ [{bookmark_id[:8]}] Thumbnail salva no RETRY FINAL")
                             else:
-                                logger.error(f"❌ [{bookmark_id[:8]}] Thumbnail falhou mesmo após retry final")
+                                # FALLBACK: Extrair frame do vídeo como thumbnail
+                                if temp_video_path and os.path.exists(temp_video_path):
+                                    logger.warning(f"🎬 [{bookmark_id[:8]}] Tentando fallback: extrair frame do vídeo...")
+                                    cloud_thumbnail_url = await thumbnail_service.extract_frame_as_thumbnail(
+                                        video_path=temp_video_path,
+                                        user_id=user_id,
+                                        bookmark_id=bookmark_id,
+                                        timestamp_seconds=2.0  # Segundo 2 para evitar fades
+                                    )
+                                    if cloud_thumbnail_url:
+                                        update_data['cloud_thumbnail_url'] = cloud_thumbnail_url
+                                        logger.info(f"✅ [{bookmark_id[:8]}] Thumbnail via FRAME FALLBACK")
+                                    else:
+                                        logger.error(f"❌ [{bookmark_id[:8]}] Thumbnail falhou em TODAS as tentativas")
+                                else:
+                                    logger.error(f"❌ [{bookmark_id[:8]}] Sem vídeo local para fallback de frame")
                         except Exception as retry_error:
                             logger.error(f"❌ [{bookmark_id[:8]}] Erro no retry final: {str(retry_error)[:80]}")
                 except Exception as e:
-                    # Não usar fallback - melhor NULL que URL que vai expirar
+                    # Fallback de frame se tiver vídeo local
                     logger.error(f"❌ [{bookmark_id[:8]}] Erro no upload thumbnail: {str(e)[:80]}")
+                    if temp_video_path and os.path.exists(temp_video_path):
+                        logger.warning(f"🎬 [{bookmark_id[:8]}] Tentando fallback após exceção...")
+                        try:
+                            cloud_thumbnail_url = await thumbnail_service.extract_frame_as_thumbnail(
+                                video_path=temp_video_path,
+                                user_id=user_id,
+                                bookmark_id=bookmark_id,
+                                timestamp_seconds=2.0
+                            )
+                            if cloud_thumbnail_url:
+                                update_data['cloud_thumbnail_url'] = cloud_thumbnail_url
+                                logger.info(f"✅ [{bookmark_id[:8]}] Thumbnail via FRAME FALLBACK (após exceção)")
+                        except Exception as fallback_error:
+                            logger.error(f"❌ [{bookmark_id[:8]}] Fallback também falhou: {str(fallback_error)[:50]}")
 
             # 🔍 LOG CRÍTICO: Verificar metadata DEPOIS de upload
             logger.info(f"🔍 [BACKGROUND_PROCESSOR] METADATA DEPOIS DE UPLOAD:")
