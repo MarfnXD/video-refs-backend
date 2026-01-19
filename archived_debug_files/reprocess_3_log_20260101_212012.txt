@@ -1,0 +1,10 @@
+REPROCESSAMENTO - 2026-01-01 21:20:12.979016
+================================================================================
+
+Total: 3
+Sucesso: 3
+Falhas: 0
+
+✅ c88c9c45: job_id=c88c9c45-6fb4-49dd-b5df-374a9adfac3f
+✅ c491cfd1: job_id=c491cfd1-c1c5-410d-aeb3-6523c970d6e2
+✅ d49a39ec: job_id=d49a39ec-2fc1-4ef0-b8ed-0ce2b5d497e9

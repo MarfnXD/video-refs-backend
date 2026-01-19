@@ -32,7 +32,7 @@ replicate_client = replicate.Client(api_token=REPLICATE_API_TOKEN)
 def generate_embedding_replicate(text: str) -> list[float]:
     """Gera embedding usando Replicate Multilingual E5 Large."""
     output = replicate_client.run(
-        "beautyyuyanli/multilingual-e5-large:96e52c11bf0097a6edef71154ac58f654e85bb92c4b14842f91ff1ee30a676e6",
+        "beautyyuyanli/multilingual-e5-large",  # Usa versão mais recente automaticamente
         input={"texts": json.dumps([text])}
     )
 
@@ -92,7 +92,8 @@ def regenerate_all_embeddings():
     print(f"💰 Custo estimado: ~${len(bookmarks) * 0.0005:.4f} USD (Replicate E5)")
     print(f"🌍 Modelo: Multilingual E5 Large (suporta 100 idiomas, incluindo português)\n")
 
-    input("Pressione ENTER para continuar...")
+    # Auto-continuar (sem confirmação manual)
+    # input("Pressione ENTER para continuar...")
 
     success_count = 0
     error_count = 0
