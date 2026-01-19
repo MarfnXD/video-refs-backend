@@ -8,8 +8,8 @@ ID,URL,migrado,data_migracao
 7,https://www.instagram.com/share/reel/BAA5QBEBO5,SIM,2026-01-19 11:28:41
 8,https://www.instagram.com/share/reel/BA3kxDOkzh,SIM,2026-01-01 21:29:27
 9,https://www.instagram.com/share/reel/BAM5olgdom,SIM,2026-01-19 15:17:55
-10,https://www.instagram.com/share/reel/BACXj2O0jD,NÃO,
-11,https://www.instagram.com/reel/DDhW5iLRaTP/,NÃO,
+10,https://www.instagram.com/share/reel/BACXj2O0jD,SIM,
+11,https://www.instagram.com/reel/DDhW5iLRaTP/,SIM,
 12,https://www.instagram.com/reel/DDh7L7Ah2jg/,SIM,2026-01-01 21:29:27
 13,https://www.instagram.com/reel/DDzlHZgSby8/,SIM,2026-01-01 21:29:27
 14,https://www.instagram.com/reel/DD0RDlaplQs/,SIM,2026-01-01 21:29:27
@@ -74,14 +74,14 @@ ID,URL,migrado,data_migracao
 73,https://www.instagram.com/reel/DESZTHjOQB9/,SIM,2026-01-02 00:42:20
 74,https://www.instagram.com/reel/DGU6HppNK7N/,SIM,2026-01-02 00:42:51
 75,https://www.instagram.com/reel/DGWxv2hgl_M/,SIM,2026-01-02 00:43:21
-76,https://www.instagram.com/reel/DFxa4siJJyp/,NÃO,
-77,https://www.instagram.com/reel/DGQmkIYJXFO/,NÃO,
-78,https://www.instagram.com/reel/DBwTCP2tJMZ/,NÃO,
-79,https://www.instagram.com/reel/DF-NkSyJzcC/,NÃO,
-80,https://www.instagram.com/reel/DGXDGYbR3Od/,NÃO,
-81,https://www.instagram.com/reel/DFnmACroecd/,NÃO,
-82,https://www.instagram.com/reel/DEVdFr9NoF9/,NÃO,
-83,https://www.instagram.com/reel/DGOCM6eOTf1/,NÃO,
+76,https://www.instagram.com/reel/DFxa4siJJyp/,SIM,2026-01-19 15:48:57
+77,https://www.instagram.com/reel/DGQmkIYJXFO/,SIM,2026-01-19 15:48:57
+78,https://www.instagram.com/reel/DBwTCP2tJMZ/,SIM,2026-01-19 15:48:57
+79,https://www.instagram.com/reel/DF-NkSyJzcC/,SIM,2026-01-19 15:59:59
+80,https://www.instagram.com/reel/DGXDGYbR3Od/,SIM,2026-01-19 15:59:59
+81,https://www.instagram.com/reel/DFnmACroecd/,SIM,2026-01-19 15:59:59
+82,https://www.instagram.com/reel/DEVdFr9NoF9/,SIM,2026-01-19 15:59:59
+83,https://www.instagram.com/reel/DGOCM6eOTf1/,SIM,2026-01-19 15:59:59
 84,https://www.instagram.com/reel/DGhCSobtPcI/,NÃO,
 85,https://www.instagram.com/reel/DFfdL92o8kj/,NÃO,
 86,https://www.instagram.com/reel/DBZCSN-vkvI/,NÃO,

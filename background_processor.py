@@ -70,12 +70,16 @@ async def process_bookmark_background(
         # PASSO 2: Extrair metadados (Apify)
         # ============================================================
         metadata = None
+        apify_raw_response = None  # Resposta bruta do Apify para debug
         if extract_metadata:
             logger.info(f"📥 Extraindo metadados via Apify...")
 
             try:
                 # Usa método unificado que detecta plataforma automaticamente
                 video_metadata = await apify_service.extract_metadata(url)
+
+                # Captura resposta bruta do Apify para debug
+                apify_raw_response = apify_service.last_raw_response
 
                 if video_metadata:
                     # Converter VideoMetadata para dict (campos corretos do modelo)
@@ -98,10 +102,16 @@ async def process_bookmark_background(
                         'platform': video_metadata.platform.value if video_metadata.platform else None,
                     }
                     logger.info(f"✅ Metadados extraídos: {metadata.get('title', 'N/A')[:50]}")
+
+                    # Log se Apify retornou erro parcial
+                    if apify_raw_response and apify_raw_response.get('error'):
+                        logger.warning(f"⚠️ [{bookmark_id[:8]}] Apify retornou dados parciais: {apify_raw_response.get('error')}")
                 else:
                     logger.warning(f"⚠️ Apify não retornou metadados")
+                    apify_raw_response = apify_raw_response or {"fallback": True, "reason": "no_metadata"}
             except Exception as e:
                 logger.error(f"❌ Erro ao extrair metadados: {str(e)}")
+                apify_raw_response = {"fallback": True, "reason": "exception", "error": str(e)}
                 # Não bloqueia - continua sem metadados
 
         # ============================================================
@@ -224,6 +234,10 @@ async def process_bookmark_background(
             'processing_completed_at': 'now()',
             'error_message': None
         }
+
+        # Salvar resposta bruta do Apify para debug (se existir)
+        if apify_raw_response:
+            update_data['apify_raw_response'] = apify_raw_response
 
         # Adicionar metadados se extraiu
         # IMPORTANTE: Só salvamos campos que EXISTEM na tabela bookmarks

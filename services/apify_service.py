@@ -49,6 +49,9 @@ class ApifyService:
 
         self.redis_client = None
 
+        # Armazena última resposta bruta do Apify para debug
+        self.last_raw_response = None
+
     def _get_next_client(self) -> ApifyClient:
         """Rotaciona entre os clientes Apify (round-robin)"""
         if not self.clients:
@@ -374,9 +377,14 @@ class ApifyService:
             # Tenta com todos os tokens disponíveis até conseguir
             data = await self._try_all_clients(run_instagram_scraper, "extract_instagram_reel")
 
+            # Salva resposta bruta para debug
+            self.last_raw_response = data
+
             # Validação de dados essenciais
-            if not data.get("caption") and not data.get("ownerUsername"):
+            # NOTA: Aceita dados parciais se tiver error (página restrita mas com thumbnail)
+            if not data.get("caption") and not data.get("ownerUsername") and not data.get("error"):
                 print("⚠️ Instagram scraper retornou dados incompletos - usando fallback")
+                self.last_raw_response = {"fallback": True, "reason": "dados_incompletos", "original": data}
                 return await self._instagram_fallback(url)
 
             # Extrair comentários se disponíveis (ordenados por likes)
@@ -412,7 +420,12 @@ class ApifyService:
 
             # Thumbnail original do Instagram (CDN)
             # IMPORTANTE: Não fazer upload aqui - o background_processor faz depois
-            thumbnail_url = data.get("displayUrl", "")
+            # Busca displayUrl (resposta completa) ou image (resposta parcial/restrita)
+            thumbnail_url = data.get("displayUrl") or data.get("image") or ""
+
+            # Log se veio de resposta restrita
+            if data.get("error"):
+                print(f"⚠️ Apify retornou erro parcial: {data.get('error')} - {data.get('errorDescription', '')}")
 
             metadata = VideoMetadata(
                 url=url,
@@ -436,6 +449,7 @@ class ApifyService:
 
         except Exception as e:
             print(f"❌ Erro no Instagram scraper: {str(e)} - usando fallback")
+            self.last_raw_response = {"fallback": True, "reason": "exception", "error": str(e)}
             return await self._instagram_fallback(url)
 
     async def _instagram_fallback(self, url: str) -> VideoMetadata:
