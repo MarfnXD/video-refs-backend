@@ -1314,6 +1314,229 @@ async def debug_code_version():
     }
 
 
+# ============================================================================
+# IDEA CAPTURE - Processamento de ideias via áudio
+# ============================================================================
+
+async def process_idea_background(idea_id: str, audio_path: str, user_id: str):
+    """
+    Processa ideia em background: transcrição + análise IA + salva no Supabase.
+    """
+    try:
+        logger.info(f"🧠 INICIANDO processamento de ideia - ID: {idea_id}")
+
+        # 1. Atualizar status → processing
+        supabase_client.table('ideas').update({
+            'status': 'processing'
+        }).eq('id', idea_id).execute()
+
+        # 2. Transcrever áudio com Whisper
+        logger.info(f"🎤 Transcrevendo áudio da ideia...")
+        transcription = await whisper_service.transcribe_audio(audio_path, language="pt")
+
+        if not transcription:
+            raise Exception("Falha na transcrição do áudio")
+
+        logger.info(f"✅ Transcrição: {len(transcription)} caracteres")
+
+        # 3. Buscar projetos existentes do usuário para matching
+        existing_projects = []
+        try:
+            projects_result = supabase_client.table('bookmarks').select('projects').eq('user_id', user_id).not_.is_('projects', 'null').execute()
+            if projects_result.data:
+                all_projects = set()
+                for row in projects_result.data:
+                    if row.get('projects'):
+                        for p in row['projects']:
+                            all_projects.add(p)
+                # Também buscar projetos das ideas
+                ideas_result = supabase_client.table('ideas').select('project').eq('user_id', user_id).not_.is_('project', 'null').execute()
+                if ideas_result.data:
+                    for row in ideas_result.data:
+                        if row.get('project'):
+                            all_projects.add(row['project'])
+                existing_projects = list(all_projects)
+        except Exception as e:
+            logger.warning(f"⚠️ Erro ao buscar projetos existentes: {e}")
+
+        # 4. Analisar com Gemini 3 Pro
+        logger.info(f"🤖 Analisando ideia com Gemini 3 Pro...")
+
+        projects_str = ", ".join(existing_projects) if existing_projects else "Nenhum projeto ainda"
+
+        prompt = f"""Você é um assistente especializado em organizar ideias e notas de voz.
+
+TRANSCRIÇÃO DO ÁUDIO:
+"{transcription}"
+
+PROJETOS EXISTENTES DO USUÁRIO:
+{projects_str}
+
+TAREFA:
+Analise a transcrição da ideia e extraia informações estruturadas.
+
+1. Crie um TÍTULO descritivo e conciso para a ideia (máximo 60 caracteres)
+2. Escreva um RESUMO claro da ideia (2-3 frases)
+3. Extraia TAGS relevantes (máximo 5, em português)
+4. Sugira CATEGORIAS (1-3) entre:
+   - Ideia de Produto
+   - Ideia de Conteúdo
+   - Ideia de Feature
+   - Ideia de Negócio
+   - Melhoria de Processo
+   - Referência/Inspiração
+   - Problema a Resolver
+   - Outro
+5. Identifique o PROJETO mencionado (se houver):
+   - Se a pessoa mencionou um projeto específico, use o nome exato
+   - Se mencionou algo similar a um projeto existente, use o existente
+   - Se não mencionou projeto, retorne null
+
+REGRAS:
+- O título deve ser auto-explicativo (alguém lendo só o título deve entender a ideia)
+- Tags em minúsculas, sem acentos, separadas
+- Se a transcrição é confusa ou incompleta, faça o melhor possível
+- Responda APENAS com JSON válido, sem markdown
+
+FORMATO DE RESPOSTA (JSON):
+{{
+    "title": "Título da ideia",
+    "summary": "Resumo claro da ideia em 2-3 frases.",
+    "tags": ["tag1", "tag2", "tag3"],
+    "categories": ["Ideia de Feature"],
+    "project": "Nome do projeto" ou null
+}}"""
+
+        title = None
+        summary = None
+        tags = []
+        categories = []
+        project = None
+
+        try:
+            output = claude_service.client.run(
+                claude_service.model_version,
+                input={
+                    "images": [],
+                    "max_output_tokens": 4096,
+                    "prompt": prompt,
+                    "temperature": 1,
+                    "thinking_level": "high",
+                    "top_p": 0.95,
+                    "videos": []
+                }
+            )
+
+            response_text = ""
+            for chunk in output:
+                response_text += chunk
+
+            # Limpar markdown code blocks
+            json_text = response_text.strip()
+            if json_text.startswith("```"):
+                lines = json_text.split('\n')
+                if lines[0].startswith('```'):
+                    lines = lines[1:]
+                if lines and lines[-1].strip() == '```':
+                    lines = lines[:-1]
+                json_text = '\n'.join(lines).strip()
+
+            import json
+            result = json.loads(json_text)
+
+            title = result.get('title')
+            summary = result.get('summary')
+            tags = result.get('tags', [])
+            categories = result.get('categories', [])
+            project = result.get('project')
+
+            logger.info(f"✅ IA processou: título='{title}', {len(tags)} tags, projeto={project}")
+
+        except Exception as e:
+            logger.error(f"❌ Erro na análise IA: {str(e)}")
+            # Fallback: usa transcrição como resumo
+            title = transcription[:60] + ('...' if len(transcription) > 60 else '')
+            summary = transcription
+
+        # 5. Salvar tudo no Supabase
+        update_data = {
+            'status': 'completed',
+            'transcription': transcription,
+            'title': title,
+            'summary': summary,
+            'tags': tags,
+            'categories': categories,
+            'processed_at': 'now()',
+            'error_message': None,
+        }
+        if project:
+            update_data['project'] = project
+
+        supabase_client.table('ideas').update(update_data).eq('id', idea_id).execute()
+
+        logger.info(f"✅ IDEIA PROCESSADA - ID: {idea_id}, Título: {title}")
+
+    except Exception as e:
+        logger.error(f"❌ ERRO processando ideia {idea_id}: {str(e)}", exc_info=True)
+        try:
+            supabase_client.table('ideas').update({
+                'status': 'failed',
+                'error_message': str(e)[:500],
+                'processed_at': 'now()',
+            }).eq('id', idea_id).execute()
+        except Exception as update_error:
+            logger.error(f"❌ Erro ao atualizar status failed: {str(update_error)}")
+    finally:
+        # Limpar arquivo temporário
+        try:
+            if os.path.exists(audio_path):
+                os.remove(audio_path)
+                logger.debug(f"🗑️ Arquivo temporário removido: {audio_path}")
+        except Exception:
+            pass
+
+
+@app.post("/api/process-idea")
+async def process_idea(
+    background_tasks: BackgroundTasks,
+    audio_file: UploadFile = File(...),
+    idea_id: str = Form(...),
+    user_id: str = Form(...)
+):
+    """
+    Recebe áudio de uma ideia, transcreve e analisa em background.
+    Retorna imediatamente - resultado via Supabase Realtime.
+    """
+    try:
+        logger.info(f"🎤 Recebendo áudio de ideia: {audio_file.filename}, idea_id: {idea_id}")
+
+        # Salvar áudio temporário
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".m4a") as tmp_file:
+            content = await audio_file.read()
+            tmp_file.write(content)
+            temp_path = tmp_file.name
+
+        logger.info(f"📁 Áudio salvo: {temp_path} ({len(content)} bytes)")
+
+        # Processar em background
+        background_tasks.add_task(
+            process_idea_background,
+            idea_id=idea_id,
+            audio_path=temp_path,
+            user_id=user_id,
+        )
+
+        return {
+            "success": True,
+            "idea_id": idea_id,
+            "message": "Ideia em processamento. Acompanhe via Realtime."
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Erro em /api/process-idea: {str(e)}")
+        return {"success": False, "error": f"Erro ao processar ideia: {str(e)}"}
+
+
 @app.on_event("shutdown")
 async def shutdown_event():
     await apify_service.close()
