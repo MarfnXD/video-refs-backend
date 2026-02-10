@@ -1391,6 +1391,11 @@ Analise a transcrição da ideia e extraia informações estruturadas.
    - Se a pessoa mencionou um projeto específico, use o nome exato
    - Se mencionou algo similar a um projeto existente, use o existente
    - Se não mencionou projeto, retorne null
+6. Identifique o TIPO da nota:
+   - "idea": uma ideia ou sugestão criativa
+   - "task": uma tarefa concreta a ser feita
+   - "reminder": um lembrete de algo
+   - "note": observação geral ou anotação
 
 REGRAS:
 - O título deve ser auto-explicativo (alguém lendo só o título deve entender a ideia)
@@ -1404,7 +1409,8 @@ FORMATO DE RESPOSTA (JSON):
     "summary": "Resumo claro da ideia em 2-3 frases.",
     "tags": ["tag1", "tag2", "tag3"],
     "categories": ["Ideia de Feature"],
-    "project": "Nome do projeto" ou null
+    "project": "Nome do projeto" ou null,
+    "note_type": "idea"
 }}"""
 
         title = None
@@ -1449,14 +1455,16 @@ FORMATO DE RESPOSTA (JSON):
             tags = result.get('tags', [])
             categories = result.get('categories', [])
             project = result.get('project')
+            note_type = result.get('note_type', 'note')
 
-            logger.info(f"✅ IA processou: título='{title}', {len(tags)} tags, projeto={project}")
+            logger.info(f"✅ IA processou: título='{title}', {len(tags)} tags, projeto={project}, tipo={note_type}")
 
         except Exception as e:
             logger.error(f"❌ Erro na análise IA: {str(e)}")
             # Fallback: usa transcrição como resumo
             title = transcription[:60] + ('...' if len(transcription) > 60 else '')
             summary = transcription
+            note_type = 'note'
 
         # 5. Salvar tudo no Supabase
         update_data = {
@@ -1475,6 +1483,28 @@ FORMATO DE RESPOSTA (JSON):
         supabase_client.table('ideas').update(update_data).eq('id', idea_id).execute()
 
         logger.info(f"✅ IDEIA PROCESSADA - ID: {idea_id}, Título: {title}")
+
+        # 6. Enviar para separador-calls (organizar em pastas locais)
+        try:
+            import httpx
+            async with httpx.AsyncClient() as http_client:
+                await http_client.post(
+                    "https://calls.beplus.community/api/idea",
+                    json={
+                        "type": "idea.processed",
+                        "title": title,
+                        "summary": summary,
+                        "transcription": transcription,
+                        "project": project,
+                        "tags": tags,
+                        "categories": categories,
+                        "note_type": note_type,
+                    },
+                    timeout=10
+                )
+            logger.info("✅ Ideia enviada para separador-calls")
+        except Exception as sc_error:
+            logger.warning(f"⚠️ Falha ao enviar para separador-calls: {sc_error}")
 
     except Exception as e:
         logger.error(f"❌ ERRO processando ideia {idea_id}: {str(e)}", exc_info=True)
