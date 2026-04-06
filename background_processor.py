@@ -376,8 +376,29 @@ async def process_bookmark_background(
                                         logger.info(f"✅ [{bookmark_id[:8]}] Thumbnail via FRAME FALLBACK")
                                     else:
                                         logger.error(f"❌ [{bookmark_id[:8]}] Thumbnail falhou em TODAS as tentativas")
+                                elif cloud_video_url:
+                                    # FALLBACK 2: Baixar trecho do cloud video e extrair frame
+                                    logger.warning(f"🎬 [{bookmark_id[:8]}] Sem vídeo local - tentando fallback via cloud_video_url...")
+                                    try:
+                                        import tempfile as _tmpf
+                                        _tmp_cloud = _tmpf.mktemp(suffix='.mp4')
+                                        async with httpx.AsyncClient(timeout=30.0) as _hclient:
+                                            _resp = await _hclient.get(cloud_video_url, headers={'Range': 'bytes=0-2097152'}, follow_redirects=True)
+                                            with open(_tmp_cloud, 'wb') as _f:
+                                                _f.write(_resp.content)
+                                        cloud_thumbnail_url = await thumbnail_service.extract_frame_as_thumbnail(
+                                            video_path=_tmp_cloud, user_id=user_id,
+                                            bookmark_id=bookmark_id, timestamp_seconds=1.0
+                                        )
+                                        if cloud_thumbnail_url:
+                                            update_data['cloud_thumbnail_url'] = cloud_thumbnail_url
+                                            logger.info(f"✅ [{bookmark_id[:8]}] Thumbnail via CLOUD VIDEO FALLBACK")
+                                        if os.path.exists(_tmp_cloud):
+                                            os.remove(_tmp_cloud)
+                                    except Exception as cloud_err:
+                                        logger.error(f"❌ [{bookmark_id[:8]}] Cloud fallback falhou: {str(cloud_err)[:60]}")
                                 else:
-                                    logger.error(f"❌ [{bookmark_id[:8]}] Sem vídeo local para fallback de frame")
+                                    logger.error(f"❌ [{bookmark_id[:8]}] Sem vídeo local/cloud para fallback de frame")
                         except Exception as retry_error:
                             logger.error(f"❌ [{bookmark_id[:8]}] Erro no retry final: {str(retry_error)[:80]}")
                 except Exception as e:
