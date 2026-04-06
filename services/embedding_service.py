@@ -2,19 +2,24 @@
 Servico de embeddings usando Gemini Embedding 2 (multimodal)
 
 Gera vetores de 768 dimensoes capturando significado semantico.
-Suporta embedding multimodal (video direto) e texto.
+Suporta embedding multimodal (video, imagem) e texto.
 
 Modelo: gemini-embedding-2-preview (768 dimensoes, multimodal)
-Custo: ~$0.20 por 1M tokens texto, ~$12/M tokens video
+- Imagens: baixa bytes e envia como inline_data (base64)
+- Videos: upload via Gemini File API, espera ACTIVE, usa file_uri
+- Texto: envia direto
 """
 import os
 import logging
+import base64
+import asyncio
 import httpx
 from typing import Optional, List
 
 logger = logging.getLogger(__name__)
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
+GEMINI_UPLOAD_BASE = "https://generativelanguage.googleapis.com/upload/v1beta"
 MODEL_NAME = "gemini-embedding-2-preview"
 OUTPUT_DIMENSIONS = 768
 
@@ -29,113 +34,204 @@ class EmbeddingService:
     def is_available(self) -> bool:
         return self.api_key is not None
 
+    def _embed_url(self) -> str:
+        return f"{GEMINI_API_BASE}/models/{MODEL_NAME}:embedContent?key={self.api_key}"
+
     async def embed_text(self, text: str) -> Optional[List[float]]:
-        """
-        Gera embedding de texto puro via Gemini Embed 2.
-
-        Args:
-            text: Texto combinado para embeddar
-
-        Returns:
-            Lista de 768 floats ou None se falhar
-        """
-        if not self.is_available:
-            logger.error("Embedding service nao disponivel (GEMINI_API_KEY faltando)")
-            return None
-
-        if not text or not text.strip():
-            logger.warning("Texto vazio para embedding")
+        """Gera embedding de texto puro (768d)."""
+        if not self.is_available or not text or not text.strip():
             return None
 
         try:
-            url = f"{GEMINI_API_BASE}/models/{MODEL_NAME}:embedContent?key={self.api_key}"
-
             payload = {
                 "model": f"models/{MODEL_NAME}",
-                "content": {
-                    "parts": [{"text": text}]
-                },
-                "outputDimensionality": OUTPUT_DIMENSIONS
+                "content": {"parts": [{"text": text}]},
+                "outputDimensionality": OUTPUT_DIMENSIONS,
             }
 
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(url, json=payload)
-                response.raise_for_status()
+                resp = await client.post(self._embed_url(), json=payload)
+                resp.raise_for_status()
 
-            data = response.json()
-            embedding = data.get("embedding", {}).get("values", [])
-
-            if not embedding:
-                logger.error(f"Resposta sem embedding: {data}")
-                return None
-
-            logger.info(f"Embedding texto gerado - {len(embedding)} dims, {len(text)} chars input")
-            return embedding
+            embedding = resp.json().get("embedding", {}).get("values", [])
+            if embedding:
+                logger.info(f"Embedding texto gerado - {len(embedding)} dims, {len(text)} chars")
+            return embedding or None
 
         except Exception as e:
-            logger.error(f"Erro ao gerar embedding texto: {str(e)}")
+            logger.error(f"Erro embedding texto: {str(e)}")
             return None
 
-    async def embed_video(self, video_url: str) -> Optional[List[float]]:
+    async def embed_image(self, image_url: str) -> Optional[List[float]]:
         """
-        Gera embedding multimodal de video via Gemini Embed 2.
-        O video e referenciado por URL (Supabase Storage signed URL).
-        Limite: 120 segundos de video.
-
-        Args:
-            video_url: URL publica do video (cloud_video_url do Supabase)
-
-        Returns:
-            Lista de 768 floats ou None se falhar
+        Baixa imagem de URL externa e gera embedding via inline_data (base64).
+        Funciona com qualquer URL publica (Supabase, Instagram CDN, etc).
         """
-        if not self.is_available:
-            logger.error("Embedding service nao disponivel (GEMINI_API_KEY faltando)")
-            return None
-
-        if not video_url:
-            logger.warning("URL de video vazia para embedding")
+        if not self.is_available or not image_url:
             return None
 
         try:
-            url = f"{GEMINI_API_BASE}/models/{MODEL_NAME}:embedContent?key={self.api_key}"
+            # Baixar imagem
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                resp = await client.get(image_url)
+                resp.raise_for_status()
 
+            image_bytes = resp.content
+            content_type = resp.headers.get("content-type", "image/jpeg").split(";")[0]
+            logger.info(f"Imagem baixada: {len(image_bytes)} bytes, {content_type}")
+
+            # Embedding via inline_data (base64)
+            b64 = base64.b64encode(image_bytes).decode("utf-8")
             payload = {
                 "model": f"models/{MODEL_NAME}",
                 "content": {
                     "parts": [{
-                        "fileData": {
-                            "mimeType": "video/mp4",
-                            "fileUri": video_url
+                        "inline_data": {
+                            "mime_type": content_type,
+                            "data": b64,
                         }
                     }]
                 },
-                "outputDimensionality": OUTPUT_DIMENSIONS
+                "outputDimensionality": OUTPUT_DIMENSIONS,
             }
 
-            # Video embedding pode demorar mais
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.post(url, json=payload)
-                response.raise_for_status()
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(self._embed_url(), json=payload)
+                resp.raise_for_status()
 
-            data = response.json()
-            embedding = data.get("embedding", {}).get("values", [])
-
-            if not embedding:
-                logger.error(f"Resposta sem embedding video: {data}")
-                return None
-
-            logger.info(f"Embedding VIDEO gerado - {len(embedding)} dims")
-            return embedding
+            embedding = resp.json().get("embedding", {}).get("values", [])
+            if embedding:
+                logger.info(f"Embedding IMAGEM gerado - {len(embedding)} dims")
+            return embedding or None
 
         except Exception as e:
-            logger.error(f"Erro ao gerar embedding video: {str(e)}")
+            logger.error(f"Erro embedding imagem: {str(e)}")
             return None
 
+    async def embed_video(self, video_url: str) -> Optional[List[float]]:
+        """
+        Baixa video de URL externa, faz upload na Gemini File API,
+        espera ACTIVE, e gera embedding multimodal (768d).
+        Limite: 120s de video.
+        """
+        if not self.is_available or not video_url:
+            return None
+
+        try:
+            # 1. Baixar video
+            logger.info(f"Baixando video pra embedding: {video_url[:60]}...")
+            async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+                resp = await client.get(video_url)
+                resp.raise_for_status()
+
+            video_bytes = resp.content
+            logger.info(f"Video baixado: {len(video_bytes)} bytes ({len(video_bytes)/1024/1024:.1f}MB)")
+
+            # Limite: 100MB por request
+            if len(video_bytes) > 100 * 1024 * 1024:
+                logger.warning("Video muito grande pra embedding (>100MB)")
+                return None
+
+            # 2. Upload na Gemini File API
+            file_uri = await self._upload_to_file_api(video_bytes, "video/mp4")
+
+            # 3. Gerar embedding com file_data
+            payload = {
+                "model": f"models/{MODEL_NAME}",
+                "content": {
+                    "parts": [{
+                        "file_data": {
+                            "mime_type": "video/mp4",
+                            "file_uri": file_uri,
+                        }
+                    }]
+                },
+                "outputDimensionality": OUTPUT_DIMENSIONS,
+            }
+
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                resp = await client.post(self._embed_url(), json=payload)
+                resp.raise_for_status()
+
+            embedding = resp.json().get("embedding", {}).get("values", [])
+            if embedding:
+                logger.info(f"Embedding VIDEO gerado - {len(embedding)} dims")
+            return embedding or None
+
+        except Exception as e:
+            logger.error(f"Erro embedding video: {str(e)}")
+            return None
+
+    async def _upload_to_file_api(self, file_bytes: bytes, mime_type: str) -> str:
+        """Upload resumable na Gemini File API. Retorna file_uri."""
+        num_bytes = len(file_bytes)
+
+        # Iniciar upload resumable
+        init_url = f"{GEMINI_UPLOAD_BASE}/files?key={self.api_key}"
+        headers = {
+            "X-Goog-Upload-Protocol": "resumable",
+            "X-Goog-Upload-Command": "start",
+            "X-Goog-Upload-Header-Content-Length": str(num_bytes),
+            "X-Goog-Upload-Header-Content-Type": mime_type,
+            "Content-Type": "application/json",
+        }
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(init_url, headers=headers, json={"file": {"display_name": "embed_video"}})
+            resp.raise_for_status()
+
+        upload_url = resp.headers.get("x-goog-upload-url")
+        if not upload_url:
+            raise ValueError("Gemini File API nao retornou upload URL")
+
+        # Enviar bytes
+        upload_headers = {
+            "Content-Length": str(num_bytes),
+            "X-Goog-Upload-Offset": "0",
+            "X-Goog-Upload-Command": "upload, finalize",
+        }
+
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            resp = await client.post(upload_url, headers=upload_headers, content=file_bytes)
+            resp.raise_for_status()
+
+        file_info = resp.json()
+        file_uri = file_info["file"]["uri"]
+        file_name = file_info["file"]["name"]
+        state = file_info["file"].get("state", "ACTIVE")
+
+        logger.info(f"File API upload OK: {file_name}, state={state}")
+
+        # Esperar processamento se necessario
+        if state == "PROCESSING":
+            file_uri = await self._wait_for_active(file_name)
+
+        return file_uri
+
+    async def _wait_for_active(self, file_name: str, max_wait: int = 120) -> str:
+        """Polling ate arquivo ficar ACTIVE na File API."""
+        check_url = f"{GEMINI_API_BASE}/{file_name}?key={self.api_key}"
+        elapsed = 0
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            while elapsed < max_wait:
+                resp = await client.get(check_url)
+                resp.raise_for_status()
+                info = resp.json()
+                state = info.get("state", "UNKNOWN")
+
+                if state == "ACTIVE":
+                    return info["uri"]
+                elif state == "FAILED":
+                    raise RuntimeError(f"File API processamento falhou: {info}")
+
+                await asyncio.sleep(3)
+                elapsed += 3
+
+        raise TimeoutError(f"File API nao ficou ACTIVE em {max_wait}s")
+
     def _build_text_from_bookmark(self, bookmark: dict) -> str:
-        """
-        Combina campos do bookmark em texto para embedding.
-        Prioridade: smart_title (2x) > auto_tags > auto_categories > transcript > visual_analysis
-        """
+        """Combina campos do bookmark em texto para embedding."""
         parts = []
 
         smart_title = bookmark.get('smart_title')
@@ -161,95 +257,42 @@ class EmbeddingService:
 
         return " | ".join(filter(None, parts))
 
-    async def embed_image(self, image_url: str) -> Optional[List[float]]:
-        """
-        Gera embedding multimodal de uma imagem via Gemini Embed 2.
-
-        Args:
-            image_url: URL publica da imagem
-
-        Returns:
-            Lista de 768 floats ou None
-        """
-        if not self.is_available or not image_url:
-            return None
-
-        try:
-            url = f"{GEMINI_API_BASE}/models/{MODEL_NAME}:embedContent?key={self.api_key}"
-
-            payload = {
-                "model": f"models/{MODEL_NAME}",
-                "content": {
-                    "parts": [{
-                        "fileData": {
-                            "mimeType": "image/jpeg",
-                            "fileUri": image_url
-                        }
-                    }]
-                },
-                "outputDimensionality": OUTPUT_DIMENSIONS
-            }
-
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(url, json=payload)
-                response.raise_for_status()
-
-            data = response.json()
-            embedding = data.get("embedding", {}).get("values", [])
-
-            if embedding:
-                logger.info(f"Embedding IMAGEM gerado - {len(embedding)} dims")
-            return embedding or None
-
-        except Exception as e:
-            logger.error(f"Erro ao gerar embedding imagem: {str(e)}")
-            return None
-
     async def generate_embedding(self, bookmark: dict) -> Optional[List[float]]:
         """
-        Gera embedding para um bookmark. Prioridade:
-        1. Video multimodal (se tem cloud_video_url)
-        2. Imagem multimodal (se tem image_urls de carousel)
+        Gera embedding para bookmark. Prioridade:
+        1. Video multimodal (baixa + File API + embed)
+        2. Imagem multimodal (baixa + inline_data base64)
         3. Texto (smart_title + tags + transcript)
         """
         cloud_video_url = bookmark.get('cloud_video_url')
         image_urls = bookmark.get('image_urls', [])
 
-        # 1. Tentar embedding multimodal (video direto)
+        # 1. Video multimodal
         if cloud_video_url:
-            logger.info("Tentando embedding multimodal (video direto)...")
+            logger.info("Tentando embedding multimodal (video)...")
             embedding = await self.embed_video(cloud_video_url)
             if embedding:
                 return embedding
             logger.warning("Embedding video falhou, tentando alternativas")
 
-        # 2. Tentar embedding multimodal (imagem)
+        # 2. Imagem multimodal
         if image_urls and isinstance(image_urls, list) and len(image_urls) > 0:
-            logger.info(f"Tentando embedding multimodal (imagem)...")
+            logger.info("Tentando embedding multimodal (imagem)...")
             embedding = await self.embed_image(image_urls[0])
             if embedding:
                 return embedding
-            logger.warning("Embedding imagem falhou, fazendo fallback para texto")
+            logger.warning("Embedding imagem falhou, fallback texto")
 
-        # 3. Fallback: embedding de texto
+        # 3. Texto
         combined_text = self._build_text_from_bookmark(bookmark)
         if not combined_text:
-            logger.warning("Nenhum conteudo disponivel para embedding")
+            logger.warning("Nenhum conteudo pra embedding")
             return None
 
         return await self.embed_text(combined_text)
 
     async def generate_query_embedding(self, query: str) -> Optional[List[float]]:
-        """
-        Gera embedding para uma query de busca.
-        Usa o mesmo modelo para garantir compatibilidade no espaco vetorial.
-
-        Args:
-            query: Texto da busca do usuario
-
-        Returns:
-            Lista de 768 floats ou None
-        """
+        """Embedding pra query de busca (mesmo modelo = mesmo espaco vetorial)."""
         return await self.embed_text(query)
 
 
