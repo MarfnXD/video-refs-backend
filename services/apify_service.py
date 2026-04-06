@@ -692,22 +692,39 @@ class ApifyService:
                 import json as _json
                 data = _json.loads(data)
 
-            # Debug: ver keys reais do data
-            print(f"🧵 Threads data type: {type(data)}, keys: {list(data.keys()) if isinstance(data, dict) else 'NOT DICT'}")
+            # Tratar ambos formatos: flat ("thread.text") e nested ({"thread": {"text": ...}})
+            thread_obj = data.get("thread") or {}
+            if isinstance(thread_obj, dict):
+                # Nested format: data["thread"]["text"]
+                text = thread_obj.get("text") or data.get("thread.text") or data.get("text") or ""
+                author = thread_obj.get("username") or data.get("thread.username") or data.get("username") or username
+                like_count = thread_obj.get("like_count") or data.get("thread.like_count") or data.get("likeCount")
+                reply_count = thread_obj.get("reply_count") or data.get("thread.reply_count") or data.get("replyCount")
+                view_count = thread_obj.get("view_count") or data.get("thread.view_count") or data.get("viewCount")
+                published = thread_obj.get("published_on") or data.get("thread.published_on") or data.get("timestamp")
+            else:
+                # Flat format: data["thread.text"]
+                text = data.get("thread.text") or data.get("text") or ""
+                author = data.get("thread.username") or data.get("username") or username
+                like_count = data.get("thread.like_count") or data.get("likeCount")
+                reply_count = data.get("thread.reply_count") or data.get("replyCount")
+                view_count = data.get("thread.view_count") or data.get("viewCount")
+                published = data.get("thread.published_on") or data.get("timestamp")
 
-            # Campos com prefixo "thread." (formato logical_scrapers)
-            text = data.get("thread.text") or data.get("text") or ""
-            author = data.get("thread.username") or data.get("username") or username
-            print(f"🧵 text=[{text[:50]}], author=[{author}], likes=[{data.get('thread.like_count')}]")
+            if not author:
+                author = username
 
             hashtags = re.findall(r'#\w+', text)
 
-            # Thumbnail: buscar em replies com imagens
+            # Replies com comentarios + thumbnail
             thumbnail_url = None
-            # Replies com comentarios reais
             top_comments = []
             replies = data.get("replies") or []
+            if not isinstance(replies, list):
+                replies = []
             for r in replies[:50]:
+                if not isinstance(r, dict):
+                    continue
                 reply_text = r.get("text", "")
                 if reply_text:
                     top_comments.append(Comment(
@@ -715,27 +732,28 @@ class ApifyService:
                         author=r.get("username", ""),
                         likes=r.get("like_count", 0),
                     ))
-                # Pegar thumbnail da primeira imagem encontrada nas replies
                 if not thumbnail_url:
                     reply_images = r.get("images") or []
-                    if reply_images:
+                    if isinstance(reply_images, list) and reply_images:
                         thumbnail_url = reply_images[0]
+
+            title = text[:100] + "..." if len(text) > 100 else text if text else "Threads Post"
 
             return VideoMetadata(
                 url=url,
                 platform=Platform.THREADS,
-                title=text[:100] + ("..." if len(text) > 100 else ""),
+                title=title,
                 description=text,
                 hashtags=hashtags,
-                views=data.get("thread.view_count") or data.get("viewCount"),
-                likes=data.get("thread.like_count") or data.get("likeCount"),
-                comments_count=data.get("thread.reply_count") or data.get("replyCount") or len(replies),
+                views=view_count,
+                likes=like_count,
+                comments_count=reply_count or len(replies),
                 top_comments=top_comments,
                 thumbnail_url=thumbnail_url,
                 duration=None,
                 author=author,
                 author_url=f"https://www.threads.com/@{author}" if author else None,
-                published_at=data.get("thread.published_on") or data.get("timestamp"),
+                published_at=str(published) if published else None,
             )
 
         except Exception as e:
