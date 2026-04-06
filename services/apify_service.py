@@ -549,18 +549,36 @@ class ApifyService:
 
         try:
             client = self._get_next_client()
-            run = client.actor("apidojo/tweet-scraper").call(
-                run_input={
-                    "startUrls": [{"url": url}],
-                    "maxItems": 1,
-                    "addUserInfo": True,
-                },
-                timeout_secs=120
-            )
+
+            # Tentar twitter-scraper-lite primeiro (suporta tweets individuais)
+            # Fallback pra tweet-scraper se nao disponivel
+            actor_name = "apidojo/twitter-scraper-lite"
+            try:
+                run = client.actor(actor_name).call(
+                    run_input={
+                        "startUrls": [{"url": url}],
+                        "maxItems": 1,
+                        "addUserInfo": True,
+                    },
+                    timeout_secs=120
+                )
+            except Exception:
+                # Fallback: tweet-scraper com searchTerms
+                import re as _re
+                tweet_id_match = _re.search(r'/status/(\d+)', url)
+                actor_name = "apidojo/tweet-scraper"
+                run = client.actor(actor_name).call(
+                    run_input={
+                        "searchTerms": [url],
+                        "maxItems": 1,
+                        "addUserInfo": True,
+                    },
+                    timeout_secs=120
+                )
 
             items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
             if not items:
-                raise ValueError("X/Twitter scraper nao retornou dados")
+                raise ValueError(f"X/Twitter scraper ({actor_name}) nao retornou dados")
 
             data = items[0]
 
@@ -625,21 +643,50 @@ class ApifyService:
 
         try:
             client = self._get_next_client()
-            run = client.actor("automation-lab/threads-scraper").call(
-                run_input={
-                    "directUrls": [url],
-                    "resultsLimit": 1,
-                },
-                timeout_secs=120
-            )
+
+            # Extrair username e post ID da URL
+            import re as _re
+            username_match = _re.search(r'threads\.(?:com|net)/@([^/]+)', url)
+            post_id_match = _re.search(r'/post/([A-Za-z0-9_-]+)', url)
+            username = username_match.group(1) if username_match else ""
+            post_id = post_id_match.group(1) if post_id_match else ""
+
+            # Tentar com directUrls primeiro, fallback pra username mode
+            try:
+                run = client.actor("automation-lab/threads-scraper").call(
+                    run_input={
+                        "usernames": [username] if username else [],
+                        "directUrls": [url],
+                        "resultsLimit": 1,
+                        "maxPosts": 1,
+                    },
+                    timeout_secs=120
+                )
+            except Exception:
+                # Fallback: curious_coder actor
+                run = client.actor("curious_coder/threads-scraper").call(
+                    run_input={
+                        "directUrls": [url],
+                        "resultsLimit": 1,
+                    },
+                    timeout_secs=120
+                )
 
             items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
             if not items:
                 raise ValueError("Threads scraper nao retornou dados")
 
+            # Filtrar pelo post_id se tiver multiplos resultados
             data = items[0]
+            if post_id and len(items) > 1:
+                for item in items:
+                    item_url = item.get("url", "") or item.get("postUrl", "")
+                    if post_id in item_url:
+                        data = item
+                        break
+
             text = data.get("text") or data.get("caption") or ""
-            author = data.get("username") or data.get("ownerUsername") or data.get("author", {}).get("username", "")
+            author = data.get("username") or data.get("ownerUsername") or username or data.get("author", {}).get("username", "")
 
             hashtags = re.findall(r'#\w+', text)
 
