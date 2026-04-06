@@ -565,51 +565,66 @@ class ApifyService:
                 raise ValueError("X/Twitter scraper nao retornou dados")
 
             data = items[0]
-            print(f"🐦 X.com raw data type: {type(data)}")
-            print(f"🐦 X.com raw data keys: {list(data.keys()) if isinstance(data, dict) else str(data)[:200]}")
             # Se veio como string, parsear JSON
             if isinstance(data, str):
                 import json as _json
                 data = _json.loads(data)
-                print(f"🐦 X.com parsed keys: {list(data.keys())}")
 
             # Campos do apidojo/tweet-scraper
-            text = data.get("text") or data.get("full_text") or ""
-            print(f"🐦 X.com text: {text[:80]}")
-            print(f"🐦 X.com likeCount: {data.get('likeCount')}, replyCount: {data.get('replyCount')}")
-            # Author: tentar varios formatos
-            author_obj = data.get("author") or {}
-            if isinstance(author_obj, dict):
-                author = author_obj.get("userName") or author_obj.get("screen_name") or ""
-            else:
-                author = ""
-            # Fallback: extrair username da URL ou twitterUrl
+            text = data.get("text") or data.get("fullText") or ""
+
+            # Author: pode ser dict, string, ou None
+            author_raw = data.get("author")
+            author = ""
+            if isinstance(author_raw, dict):
+                author = author_raw.get("userName") or author_raw.get("screen_name") or author_raw.get("name") or ""
+            elif isinstance(author_raw, str):
+                author = author_raw
+            # Fallback: extrair username da URL
             if not author:
                 tweet_url = data.get("twitterUrl") or data.get("url") or url
-                import re as _re
-                user_match = _re.search(r'(?:x\.com|twitter\.com)/([^/]+)/status', tweet_url)
+                user_match = re.search(r'(?:x\.com|twitter\.com)/([^/]+)/status', tweet_url)
                 author = user_match.group(1) if user_match else ""
 
             hashtags = re.findall(r'#\w+', text)
 
             # Thumbnail: buscar em media arrays
             thumbnail_url = None
-            media_list = data.get("media", []) or data.get("extendedEntities", {}).get("media", []) or []
+            media_list = data.get("media") or []
+            if not isinstance(media_list, list):
+                media_list = []
+            ext_entities = data.get("extendedEntities")
+            if isinstance(ext_entities, dict):
+                ext_media = ext_entities.get("media") or []
+                if isinstance(ext_media, list):
+                    media_list = media_list or ext_media
             for m in media_list:
+                if not isinstance(m, dict):
+                    continue
                 thumb = m.get("media_url_https") or m.get("url") or m.get("media_url")
-                if thumb:
+                if thumb and isinstance(thumb, str):
                     thumbnail_url = thumb
                     break
 
             # Comentarios (replies)
             top_comments = []
-            replies = data.get("replies", []) or []
+            replies = data.get("replies") or []
+            if not isinstance(replies, list):
+                replies = []
             for r in replies[:50]:
+                if not isinstance(r, dict):
+                    continue
                 reply_text = r.get("text", "")
+                reply_author_raw = r.get("author")
+                reply_author = ""
+                if isinstance(reply_author_raw, dict):
+                    reply_author = reply_author_raw.get("userName", "")
+                elif isinstance(reply_author_raw, str):
+                    reply_author = reply_author_raw
                 if reply_text:
                     top_comments.append(Comment(
                         text=reply_text,
-                        author=r.get("author", {}).get("userName", ""),
+                        author=reply_author,
                         likes=r.get("likeCount", 0),
                     ))
 
