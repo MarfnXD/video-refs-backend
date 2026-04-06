@@ -565,13 +565,18 @@ class ApifyService:
                 raise ValueError("X/Twitter scraper nao retornou dados")
 
             data = items[0]
+            print(f"🐦 X.com raw data type: {type(data)}")
+            print(f"🐦 X.com raw data keys: {list(data.keys()) if isinstance(data, dict) else str(data)[:200]}")
             # Se veio como string, parsear JSON
             if isinstance(data, str):
                 import json as _json
                 data = _json.loads(data)
+                print(f"🐦 X.com parsed keys: {list(data.keys())}")
 
             # Campos do apidojo/tweet-scraper
             text = data.get("text") or data.get("full_text") or ""
+            print(f"🐦 X.com text: {text[:80]}")
+            print(f"🐦 X.com likeCount: {data.get('likeCount')}, replyCount: {data.get('replyCount')}")
             # Author: tentar varios formatos
             author_obj = data.get("author") or {}
             if isinstance(author_obj, dict):
