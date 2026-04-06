@@ -692,9 +692,13 @@ class ApifyService:
                 import json as _json
                 data = _json.loads(data)
 
+            # Debug: ver keys reais do data
+            print(f"🧵 Threads data type: {type(data)}, keys: {list(data.keys()) if isinstance(data, dict) else 'NOT DICT'}")
+
             # Campos com prefixo "thread." (formato logical_scrapers)
             text = data.get("thread.text") or data.get("text") or ""
             author = data.get("thread.username") or data.get("username") or username
+            print(f"🧵 text=[{text[:50]}], author=[{author}], likes=[{data.get('thread.like_count')}]")
 
             hashtags = re.findall(r'#\w+', text)
 
