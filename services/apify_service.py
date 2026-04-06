@@ -570,10 +570,6 @@ class ApifyService:
                 import json as _json
                 data = _json.loads(data)
 
-            # Debug: ver estrutura de media
-            print(f"🐦 media type: {type(data.get('media'))}, content: {str(data.get('media'))[:300]}")
-            print(f"🐦 extendedEntities type: {type(data.get('extendedEntities'))}, content: {str(data.get('extendedEntities'))[:300]}")
-
             # Campos do apidojo/tweet-scraper
             text = data.get("text") or data.get("fullText") or ""
 
@@ -592,23 +588,30 @@ class ApifyService:
 
             hashtags = re.findall(r'#\w+', text)
 
-            # Thumbnail: buscar em media arrays
+            # Thumbnail: campo "media" e array de URLs (strings diretas)
             thumbnail_url = None
             media_list = data.get("media") or []
-            if not isinstance(media_list, list):
-                media_list = []
-            ext_entities = data.get("extendedEntities")
-            if isinstance(ext_entities, dict):
-                ext_media = ext_entities.get("media") or []
-                if isinstance(ext_media, list):
-                    media_list = media_list or ext_media
-            for m in media_list:
-                if not isinstance(m, dict):
-                    continue
-                thumb = m.get("media_url_https") or m.get("url") or m.get("media_url")
-                if thumb and isinstance(thumb, str):
-                    thumbnail_url = thumb
-                    break
+            if isinstance(media_list, list):
+                for m in media_list:
+                    if isinstance(m, str) and m.startswith("http"):
+                        thumbnail_url = m
+                        break
+                    elif isinstance(m, dict):
+                        thumb = m.get("media_url_https") or m.get("url")
+                        if thumb:
+                            thumbnail_url = thumb
+                            break
+            # Fallback: extendedEntities.media[].media_url_https
+            if not thumbnail_url:
+                ext_entities = data.get("extendedEntities")
+                if isinstance(ext_entities, dict):
+                    ext_media = ext_entities.get("media") or []
+                    if isinstance(ext_media, list):
+                        for m in ext_media:
+                            if isinstance(m, dict):
+                                thumbnail_url = m.get("media_url_https")
+                                if thumbnail_url:
+                                    break
 
             # Comentarios (replies)
             top_comments = []
