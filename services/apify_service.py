@@ -425,18 +425,45 @@ class ApifyService:
             hashtags = re.findall(r"#\w+", caption)
 
             # Thumbnail original do Instagram (CDN)
-            # IMPORTANTE: Não fazer upload aqui - o background_processor faz depois
-            # Busca displayUrl (resposta completa) ou image (resposta parcial/restrita)
             thumbnail_url = data.get("displayUrl") or data.get("image") or ""
+
+            # Detectar carousel (sidecar) e extrair todos os media items
+            carousel_items = []
+            sidecar = data.get("childPosts") or data.get("sidecarMediaResources") or data.get("images") or []
+            if sidecar and isinstance(sidecar, list) and len(sidecar) > 1:
+                print(f"🎠 Carousel detectado: {len(sidecar)} items")
+                for i, item in enumerate(sidecar):
+                    media_item = {
+                        "index": i,
+                        "type": "video" if item.get("videoUrl") or item.get("type") == "Video" else "image",
+                        "url": item.get("videoUrl") or item.get("url") or item.get("displayUrl") or item.get("src") or "",
+                        "thumbnail": item.get("displayUrl") or item.get("url") or item.get("src") or "",
+                    }
+                    carousel_items.append(media_item)
+                # Usar thumbnail do primeiro item se disponivel
+                if not thumbnail_url and carousel_items:
+                    thumbnail_url = carousel_items[0].get("thumbnail", "")
 
             # Log se veio de resposta restrita
             if data.get("error"):
                 print(f"⚠️ Apify retornou erro parcial: {data.get('error')} - {data.get('errorDescription', '')}")
 
+            # Determinar tipo de post
+            post_type = data.get("type", "").lower()
+            if carousel_items:
+                post_type = "carousel"
+            elif data.get("videoUrl") or data.get("videoDuration"):
+                post_type = "video"
+            else:
+                post_type = "image"
+
+            title_prefix = {"carousel": "Instagram Carousel", "video": "Instagram Reel", "image": "Instagram Post"}.get(post_type, "Instagram Post")
+            title = caption[:100] + "..." if len(caption) > 100 else caption if caption else title_prefix
+
             metadata = VideoMetadata(
                 url=url,
                 platform=Platform.INSTAGRAM,
-                title=caption[:100] + "..." if len(caption) > 100 else caption if caption else "Instagram Reel",
+                title=title,
                 description=caption,
                 hashtags=hashtags,
                 views=data.get("videoViewCount", 0),
@@ -449,6 +476,15 @@ class ApifyService:
                 author_url=f"https://www.instagram.com/{data.get('ownerUsername', '')}" if data.get('ownerUsername') else "",
                 published_at=data.get("timestamp", "")
             )
+
+            # Salvar carousel items no metadata extra (acessivel via metadata JSON no Supabase)
+            if carousel_items:
+                metadata_dict = metadata.dict()
+                metadata_dict["carousel_items"] = carousel_items
+                metadata_dict["post_type"] = post_type
+                metadata_dict["carousel_count"] = len(carousel_items)
+                await self.cache_set(cache_key, metadata_dict)
+                return metadata
 
             await self.cache_set(cache_key, metadata.dict())
             return metadata
