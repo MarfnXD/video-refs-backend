@@ -127,6 +127,20 @@ async def health_check():
     return {"status": "healthy"}
 
 
+@app.get("/debug/apify-status")
+async def debug_apify_status():
+    """Temporário: verifica estado dos tokens Apify"""
+    import os
+    token_raw = os.getenv("APIFY_TOKEN", "")
+    return {
+        "token_configured": bool(token_raw),
+        "token_prefix": token_raw[:15] + "..." if token_raw else "EMPTY",
+        "tokens_count": len(apify_service.apify_tokens),
+        "clients_count": len(apify_service.clients),
+        "current_index": apify_service._current_client_index,
+    }
+
+
 @app.post("/api/extract-metadata", response_model=ExtractResponse)
 async def extract_metadata(request: ExtractRequest):
     """
