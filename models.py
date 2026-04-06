@@ -7,6 +7,8 @@ class Platform(str, Enum):
     YOUTUBE = "youtube"
     TIKTOK = "tiktok"
     INSTAGRAM = "instagram"
+    X = "x"
+    THREADS = "threads"
 
 
 class Comment(BaseModel):

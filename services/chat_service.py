@@ -2,18 +2,22 @@
 Serviço de chat com IA para busca semântica de bookmarks.
 
 Usa embeddings + busca vetorial + Claude API para conversação inteligente.
-Usa OpenAI para embeddings (text-embedding-3-small, 1536 dims).
+Embeddings via Gemini Embed 2 (768 dims, multimodal).
 """
 
 from supabase import create_client, Client
 from typing import List, Dict, Any, Optional
 import os
+import logging
 from openai import OpenAI
 import replicate
+from services.embedding_service import embedding_service
+
+logger = logging.getLogger(__name__)
 
 # Configuração
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")  # NUNCA hardcode esta chave!
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
 
@@ -21,41 +25,21 @@ REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError("SUPABASE_URL e SUPABASE_KEY devem estar definidas nas variáveis de ambiente!")
 
-if not OPENAI_API_KEY:
-    raise ValueError("OPENAI_API_KEY não configurada! Chat com IA requer OpenAI API token.")
-
 # Clientes globais
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
+openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 replicate_client = replicate.Client(api_token=REPLICATE_API_TOKEN) if REPLICATE_API_TOKEN else None
 
 
 async def generate_embedding(text: str) -> List[float]:
     """
-    Gera embedding usando OpenAI text-embedding-3-small.
-
-    Vantagens:
-    - Alta qualidade e precisão
-    - Suporta 100+ idiomas (incluindo português)
-    - 1536 dimensões
-    - API estável e confiável
+    Gera embedding de texto via Gemini Embed 2 (768 dims).
+    Usado para queries de busca semantica.
     """
-    if not openai_client:
-        raise ValueError("OpenAI client não inicializado!")
-
-    # Chama OpenAI API
-    response = openai_client.embeddings.create(
-        model="text-embedding-3-small",
-        input=text
-    )
-
-    # Extrai embedding (1536 dimensões)
-    embedding = response.data[0].embedding
-
-    if not embedding or len(embedding) == 0:
-        raise ValueError("OpenAI não retornou embeddings")
-
-    return embedding
+    result = await embedding_service.embed_text(text)
+    if not result:
+        raise ValueError("Gemini Embed 2 nao retornou embedding")
+    return result
 
 
 async def search_bookmarks(query: str, limit: int = 10, threshold: float = 0.3) -> List[Dict[str, Any]]:

@@ -368,6 +368,31 @@ async def process_bookmark_background(
         if smart_title:
             update_data['smart_title'] = smart_title
 
+        # ============================================================
+        # PASSO 5.5: Gerar Embedding (Gemini Embed 2 - multimodal)
+        # ============================================================
+        try:
+            from services.embedding_service import embedding_service
+
+            embedding_data = {
+                'smart_title': smart_title or update_data.get('title'),
+                'auto_tags': auto_tags,
+                'auto_categories': auto_categories,
+                'video_transcript': gemini_analysis.get('transcript') if gemini_analysis else None,
+                'visual_analysis': gemini_analysis.get('visual_analysis') if gemini_analysis else None,
+                'cloud_video_url': update_data.get('cloud_video_url'),
+            }
+
+            embedding = await embedding_service.generate_embedding(embedding_data)
+
+            if embedding:
+                update_data['embedding'] = embedding
+                logger.info(f"✅ Embedding gerado - {len(embedding)} dimensoes")
+            else:
+                logger.warning("⚠️ Embedding nao gerado (sem conteudo suficiente)")
+        except Exception as e:
+            logger.error(f"⚠️ Erro ao gerar embedding (nao bloqueia pipeline): {str(e)}")
+
         # UPDATE no Supabase
         supabase.table('bookmarks').update(update_data).eq('id', bookmark_id).execute()
 

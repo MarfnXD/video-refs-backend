@@ -140,12 +140,18 @@ class ApifyService:
             return Platform.TIKTOK
         elif "instagram.com" in url:
             return Platform.INSTAGRAM
+        elif "x.com" in url or "twitter.com" in url:
+            return Platform.X
+        elif "threads.net" in url:
+            return Platform.THREADS
         else:
             raise ValueError(f"Plataforma não suportada para URL: {url}")
 
     def extract_video_id_youtube(self, url: str) -> str:
         if "youtu.be/" in url:
             return url.split("youtu.be/")[-1].split("?")[0]
+        elif "youtube.com/shorts/" in url:
+            return url.split("youtube.com/shorts/")[-1].split("?")[0].split("/")[0]
         elif "youtube.com/watch" in url:
             parsed = urlparse(url)
             return parse_qs(parsed.query)["v"][0]
@@ -494,8 +500,130 @@ class ApifyService:
             return await self.extract_tiktok(url)
         elif platform == Platform.INSTAGRAM:
             return await self.extract_instagram_reel(url)
+        elif platform == Platform.X:
+            return await self.extract_x_tweet(url)
+        elif platform == Platform.THREADS:
+            return await self.extract_threads_post(url)
         else:
             raise ValueError(f"Plataforma não suportada: {platform}")
+
+    async def extract_x_tweet(self, url: str) -> VideoMetadata:
+        """Extrai metadata de tweet/post do X.com (Twitter)"""
+        print(f"🐦 Extraindo metadata do X/Twitter: {url}")
+
+        try:
+            client = self._get_next_client()
+            run = client.actor("apidojo/tweet-scraper").call(
+                run_input={
+                    "startUrls": [{"url": url}],
+                    "maxItems": 1,
+                    "addUserInfo": True,
+                },
+                timeout_secs=120
+            )
+
+            items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
+            if not items:
+                raise ValueError("X/Twitter scraper nao retornou dados")
+
+            data = items[0]
+            text = data.get("full_text") or data.get("text") or ""
+            author = data.get("user", {}).get("screen_name") or data.get("author", {}).get("userName", "")
+
+            # Extrair hashtags
+            hashtags = re.findall(r'#\w+', text)
+
+            # Thumbnail do video (se existir)
+            thumbnail_url = None
+            media = data.get("extended_entities", {}).get("media", []) or data.get("entities", {}).get("media", [])
+            for m in media:
+                if m.get("type") in ("video", "animated_gif"):
+                    thumbnail_url = m.get("media_url_https") or m.get("media_url")
+                    break
+                elif m.get("type") == "photo":
+                    thumbnail_url = m.get("media_url_https") or m.get("media_url")
+
+            return VideoMetadata(
+                url=url,
+                platform=Platform.X,
+                title=text[:100] + ("..." if len(text) > 100 else ""),
+                description=text,
+                hashtags=hashtags,
+                views=data.get("views_count") or data.get("view_count"),
+                likes=data.get("favorite_count") or data.get("likeCount"),
+                comments_count=data.get("reply_count") or data.get("replyCount"),
+                top_comments=[],
+                thumbnail_url=thumbnail_url,
+                duration=None,
+                author=author,
+                author_url=f"https://x.com/{author}" if author else None,
+                published_at=data.get("created_at") or data.get("createdAt"),
+            )
+
+        except Exception as e:
+            print(f"❌ Erro ao extrair X/Twitter: {str(e)}")
+            # Fallback minimo
+            return VideoMetadata(
+                url=url,
+                platform=Platform.X,
+                title="X Post",
+                description="",
+                hashtags=[],
+            )
+
+    async def extract_threads_post(self, url: str) -> VideoMetadata:
+        """Extrai metadata de post do Threads"""
+        print(f"🧵 Extraindo metadata do Threads: {url}")
+
+        try:
+            client = self._get_next_client()
+            run = client.actor("apify/threads-scraper").call(
+                run_input={
+                    "directUrls": [url],
+                    "resultsLimit": 1,
+                },
+                timeout_secs=120
+            )
+
+            items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
+            if not items:
+                raise ValueError("Threads scraper nao retornou dados")
+
+            data = items[0]
+            text = data.get("text") or data.get("caption") or ""
+            author = data.get("ownerUsername") or data.get("author", {}).get("username", "")
+
+            hashtags = re.findall(r'#\w+', text)
+
+            thumbnail_url = data.get("thumbnailUrl") or data.get("displayUrl")
+
+            return VideoMetadata(
+                url=url,
+                platform=Platform.THREADS,
+                title=text[:100] + ("..." if len(text) > 100 else ""),
+                description=text,
+                hashtags=hashtags,
+                views=data.get("viewCount"),
+                likes=data.get("likeCount") or data.get("likesCount"),
+                comments_count=data.get("replyCount") or data.get("commentsCount"),
+                top_comments=[],
+                thumbnail_url=thumbnail_url,
+                duration=None,
+                author=author,
+                author_url=f"https://threads.net/@{author}" if author else None,
+                published_at=data.get("publishedAt") or data.get("timestamp"),
+            )
+
+        except Exception as e:
+            print(f"❌ Erro ao extrair Threads: {str(e)}")
+            # Fallback minimo
+            return VideoMetadata(
+                url=url,
+                platform=Platform.THREADS,
+                title="Threads Post",
+                description="",
+                hashtags=[],
+            )
 
     async def extract_video_download_url_tiktok(self, url: str, quality: str = "480p") -> dict:
         """

@@ -1,139 +1,209 @@
 """
-Serviço para geração de embeddings usando Gemini Embedding API
+Servico de embeddings usando Gemini Embedding 2 (multimodal)
 
-Embeddings são vetores de 768 dimensões que capturam significado semântico.
-Usado para:
-- Clusterização visual (UMAP 768D → 2D)
-- Busca por similaridade
-- Recomendações
+Gera vetores de 768 dimensoes capturando significado semantico.
+Suporta embedding multimodal (video direto) e texto.
 
-Modelo: text-embedding-004 (estável, 768 dimensões)
-Custo: ~$0.00001 por embedding (praticamente grátis)
+Modelo: gemini-embedding-2-preview (768 dimensoes, multimodal)
+Custo: ~$0.20 por 1M tokens texto, ~$12/M tokens video
 """
 import os
 import logging
+import httpx
 from typing import Optional, List
-import google.generativeai as genai
 
 logger = logging.getLogger(__name__)
+
+GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
+MODEL_NAME = "gemini-embedding-2-preview"
+OUTPUT_DIMENSIONS = 768
 
 
 class EmbeddingService:
     def __init__(self):
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            logger.warning("GEMINI_API_KEY não configurada - Embedding service desabilitado")
-            self.client = None
-        else:
-            genai.configure(api_key=api_key)
-            self.client = genai
+        self.api_key = os.getenv("GEMINI_API_KEY")
+        if not self.api_key:
+            logger.warning("GEMINI_API_KEY nao configurada - Embedding service desabilitado")
 
-        # Modelo de embedding (768 dimensões)
-        self.model_name = "models/text-embedding-004"
+    @property
+    def is_available(self) -> bool:
+        return self.api_key is not None
 
-    def generate_embedding(
-        self,
-        smart_title: Optional[str] = None,
-        auto_tags: Optional[List[str]] = None,
-        auto_categories: Optional[List[str]] = None,
-        video_transcript: Optional[str] = None,
-        visual_analysis: Optional[str] = None
-    ) -> Optional[List[float]]:
+    async def embed_text(self, text: str) -> Optional[List[float]]:
         """
-        Gera embedding combinando múltiplos campos do bookmark
-
-        Prioridade de informação:
-        1. smart_title (40%) - Título descritivo gerado pela IA
-        2. auto_tags (20%) - Tags automáticas
-        3. auto_categories (10%) - Categorias
-        4. video_transcript (15%) - Transcrição de áudio
-        5. visual_analysis (15%) - Análise visual
+        Gera embedding de texto puro via Gemini Embed 2.
 
         Args:
-            smart_title: Título descritivo (ex: "Tutorial de Motion Graphics com After Effects")
-            auto_tags: Lista de tags (ex: ["motion design", "after effects"])
-            auto_categories: Lista de categorias (ex: ["Tutorial", "Motion Design"])
-            video_transcript: Transcrição do áudio/legendas
-            visual_analysis: Análise visual do Gemini Flash
+            text: Texto combinado para embeddar
 
         Returns:
             Lista de 768 floats ou None se falhar
         """
-        if not self.client:
-            logger.error("❌ Embedding client não inicializado (GEMINI_API_KEY faltando)")
+        if not self.is_available:
+            logger.error("Embedding service nao disponivel (GEMINI_API_KEY faltando)")
+            return None
+
+        if not text or not text.strip():
+            logger.warning("Texto vazio para embedding")
             return None
 
         try:
-            # Montar texto combinado (priorizando campos mais importantes)
-            text_parts = []
+            url = f"{GEMINI_API_BASE}/models/{MODEL_NAME}:embedContent?key={self.api_key}"
 
-            # 1. Smart title (repetido 2x para dar mais peso)
-            if smart_title:
-                text_parts.append(smart_title)
-                text_parts.append(smart_title)
+            payload = {
+                "model": f"models/{MODEL_NAME}",
+                "content": {
+                    "parts": [{"text": text}]
+                },
+                "outputDimensionality": OUTPUT_DIMENSIONS
+            }
 
-            # 2. Tags (separadas por vírgula)
-            if auto_tags:
-                text_parts.append(", ".join(auto_tags))
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
 
-            # 3. Categorias
-            if auto_categories:
-                text_parts.append(", ".join(auto_categories))
+            data = response.json()
+            embedding = data.get("embedding", {}).get("values", [])
 
-            # 4. Transcrição (primeiros 500 caracteres)
-            if video_transcript:
-                text_parts.append(video_transcript[:500])
-
-            # 5. Análise visual (primeiros 500 caracteres)
-            if visual_analysis:
-                text_parts.append(str(visual_analysis)[:500])
-
-            # Combinar tudo
-            combined_text = " | ".join(filter(None, text_parts))
-
-            if not combined_text:
-                logger.warning("⚠️ Nenhum conteúdo para gerar embedding")
+            if not embedding:
+                logger.error(f"Resposta sem embedding: {data}")
                 return None
 
-            logger.info(f"📊 Gerando embedding - Texto combinado: {len(combined_text)} chars")
-            logger.debug(f"Preview: {combined_text[:200]}...")
-
-            # Chamar API do Gemini
-            result = genai.embed_content(
-                model=self.model_name,
-                content=combined_text,
-                task_type="clustering"  # Otimizado para clusterização
-            )
-
-            # Extrair embedding
-            embedding = result['embedding']
-
-            logger.info(f"✅ Embedding gerado - Dimensões: {len(embedding)}")
-
+            logger.info(f"Embedding texto gerado - {len(embedding)} dims, {len(text)} chars input")
             return embedding
 
         except Exception as e:
-            logger.error(f"❌ Erro ao gerar embedding: {str(e)}")
+            logger.error(f"Erro ao gerar embedding texto: {str(e)}")
             return None
 
-    def generate_from_bookmark_dict(self, bookmark: dict) -> Optional[List[float]]:
+    async def embed_video(self, video_url: str) -> Optional[List[float]]:
         """
-        Helper para gerar embedding a partir de dict do Supabase
+        Gera embedding multimodal de video via Gemini Embed 2.
+        O video e referenciado por URL (Supabase Storage signed URL).
+        Limite: 120 segundos de video.
 
         Args:
-            bookmark: Dict com campos do bookmark (smart_title, auto_tags, etc)
+            video_url: URL publica do video (cloud_video_url do Supabase)
+
+        Returns:
+            Lista de 768 floats ou None se falhar
+        """
+        if not self.is_available:
+            logger.error("Embedding service nao disponivel (GEMINI_API_KEY faltando)")
+            return None
+
+        if not video_url:
+            logger.warning("URL de video vazia para embedding")
+            return None
+
+        try:
+            url = f"{GEMINI_API_BASE}/models/{MODEL_NAME}:embedContent?key={self.api_key}"
+
+            payload = {
+                "model": f"models/{MODEL_NAME}",
+                "content": {
+                    "parts": [{
+                        "fileData": {
+                            "mimeType": "video/mp4",
+                            "fileUri": video_url
+                        }
+                    }]
+                },
+                "outputDimensionality": OUTPUT_DIMENSIONS
+            }
+
+            # Video embedding pode demorar mais
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+
+            data = response.json()
+            embedding = data.get("embedding", {}).get("values", [])
+
+            if not embedding:
+                logger.error(f"Resposta sem embedding video: {data}")
+                return None
+
+            logger.info(f"Embedding VIDEO gerado - {len(embedding)} dims")
+            return embedding
+
+        except Exception as e:
+            logger.error(f"Erro ao gerar embedding video: {str(e)}")
+            return None
+
+    def _build_text_from_bookmark(self, bookmark: dict) -> str:
+        """
+        Combina campos do bookmark em texto para embedding.
+        Prioridade: smart_title (2x) > auto_tags > auto_categories > transcript > visual_analysis
+        """
+        parts = []
+
+        smart_title = bookmark.get('smart_title')
+        if smart_title:
+            parts.append(smart_title)
+            parts.append(smart_title)  # 2x peso
+
+        auto_tags = bookmark.get('auto_tags')
+        if auto_tags and isinstance(auto_tags, list):
+            parts.append(", ".join(auto_tags))
+
+        auto_categories = bookmark.get('auto_categories')
+        if auto_categories and isinstance(auto_categories, list):
+            parts.append(", ".join(auto_categories))
+
+        transcript = bookmark.get('video_transcript')
+        if transcript:
+            parts.append(str(transcript)[:500])
+
+        visual = bookmark.get('visual_analysis')
+        if visual:
+            parts.append(str(visual)[:500])
+
+        return " | ".join(filter(None, parts))
+
+    async def generate_embedding(self, bookmark: dict) -> Optional[List[float]]:
+        """
+        Gera embedding para um bookmark. Usa video multimodal se disponivel,
+        senao faz fallback para texto.
+
+        Args:
+            bookmark: Dict com campos do bookmark (smart_title, auto_tags,
+                      cloud_video_url, video_transcript, etc)
 
         Returns:
             Lista de 768 floats ou None
         """
-        return self.generate_embedding(
-            smart_title=bookmark.get('smart_title'),
-            auto_tags=bookmark.get('auto_tags'),
-            auto_categories=bookmark.get('auto_categories'),
-            video_transcript=bookmark.get('video_transcript'),
-            visual_analysis=bookmark.get('visual_analysis')
-        )
+        cloud_video_url = bookmark.get('cloud_video_url')
+
+        # Tentar embedding multimodal (video direto) primeiro
+        if cloud_video_url:
+            logger.info("Tentando embedding multimodal (video direto)...")
+            embedding = await self.embed_video(cloud_video_url)
+            if embedding:
+                return embedding
+            logger.warning("Embedding video falhou, fazendo fallback para texto")
+
+        # Fallback: embedding de texto
+        combined_text = self._build_text_from_bookmark(bookmark)
+        if not combined_text:
+            logger.warning("Nenhum conteudo disponivel para embedding")
+            return None
+
+        return await self.embed_text(combined_text)
+
+    async def generate_query_embedding(self, query: str) -> Optional[List[float]]:
+        """
+        Gera embedding para uma query de busca.
+        Usa o mesmo modelo para garantir compatibilidade no espaco vetorial.
+
+        Args:
+            query: Texto da busca do usuario
+
+        Returns:
+            Lista de 768 floats ou None
+        """
+        return await self.embed_text(query)
 
 
-# Singleton instance
+# Singleton
 embedding_service = EmbeddingService()

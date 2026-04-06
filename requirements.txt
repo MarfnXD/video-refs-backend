@@ -12,3 +12,4 @@ supabase
 yt-dlp
 celery[redis]
 flower
+google-generativeai
