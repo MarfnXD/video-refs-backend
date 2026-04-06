@@ -125,23 +125,34 @@ async def process_bookmark_background(
         # Detectar se post tem video (carrosseis/fotos nao tem)
         has_video = True
         image_urls = []
+        carousel_media = []  # Todas as medias do carousel pra salvar no Supabase
         if metadata:
             duration = metadata.get('duration', '')
             if not duration or duration == '' or duration == '0':
                 if 'instagram' in url.lower():
                     has_video = False
-                    # Coletar URLs de imagens pra analise Gemini
-                    thumbnail = metadata.get('thumbnail_url', '')
-                    if thumbnail:
-                        image_urls.append(thumbnail)
-                    # Se tem carousel_items no raw response
+                    # Coletar TODAS URLs de imagens do carousel
                     if apify_raw_response and isinstance(apify_raw_response, dict):
                         carousel = apify_raw_response.get('childPosts') or apify_raw_response.get('sidecarMediaResources') or apify_raw_response.get('images') or []
-                        for item in carousel[:6]:
-                            img_url = item.get('displayUrl') or item.get('url') or item.get('src') or ''
-                            if img_url and img_url not in image_urls:
-                                image_urls.append(img_url)
-                    logger.info(f"📸 Post Instagram sem video - {len(image_urls)} imagens coletadas pra analise")
+                        for i, item in enumerate(carousel):
+                            media_type = "video" if item.get("videoUrl") or item.get("type") == "Video" else "image"
+                            media_url = item.get('videoUrl') or item.get('displayUrl') or item.get('url') or item.get('src') or ''
+                            thumb_url = item.get('displayUrl') or item.get('url') or item.get('src') or ''
+                            if media_url:
+                                carousel_media.append({
+                                    "index": i,
+                                    "type": media_type,
+                                    "url": media_url,
+                                    "thumbnail": thumb_url,
+                                })
+                                if media_type == "image" and thumb_url not in image_urls:
+                                    image_urls.append(thumb_url)
+                    # Fallback: usar thumbnail principal se carousel vazio
+                    if not image_urls:
+                        thumbnail = metadata.get('thumbnail_url', '')
+                        if thumbnail:
+                            image_urls.append(thumbnail)
+                    logger.info(f"📸 Post Instagram sem video - {len(carousel_media)} carousel items, {len(image_urls)} imagens pra analise")
 
         if upload_to_cloud and metadata and has_video:
             try:
@@ -401,6 +412,11 @@ async def process_bookmark_background(
         # Adicionar smart_title se foi gerado
         if smart_title:
             update_data['smart_title'] = smart_title
+
+        # Salvar carousel media items (todas as imagens/videos do carousel)
+        if carousel_media:
+            update_data['carousel_media'] = carousel_media
+            logger.info(f"🎠 Salvando {len(carousel_media)} carousel media items")
 
         # ============================================================
         # PASSO 5.5: Gerar Embedding (Gemini Embed 2 - multimodal)

@@ -257,12 +257,67 @@ class EmbeddingService:
 
         return " | ".join(filter(None, parts))
 
+    async def embed_multiple_images(self, image_urls: list) -> Optional[List[float]]:
+        """
+        Embeda ate 6 imagens de um carousel numa unica chamada.
+        Baixa todas, envia como inline_data (base64) em parts separadas.
+        O Gemini Embed 2 gera um unico vetor que captura todas as imagens.
+        """
+        if not self.is_available or not image_urls:
+            return None
+
+        try:
+            urls = image_urls[:6]  # Limite de 6 imagens
+            parts = []
+
+            # Baixar todas as imagens
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                for img_url in urls:
+                    try:
+                        resp = await client.get(img_url)
+                        resp.raise_for_status()
+                        content_type = resp.headers.get("content-type", "image/jpeg").split(";")[0]
+                        b64 = base64.b64encode(resp.content).decode("utf-8")
+                        parts.append({
+                            "inline_data": {
+                                "mime_type": content_type,
+                                "data": b64,
+                            }
+                        })
+                    except Exception as e:
+                        logger.warning(f"Falha ao baixar imagem {img_url[:50]}: {e}")
+
+            if not parts:
+                return None
+
+            logger.info(f"Embedding {len(parts)} imagens do carousel...")
+
+            payload = {
+                "model": f"models/{MODEL_NAME}",
+                "content": {"parts": parts},
+                "outputDimensionality": OUTPUT_DIMENSIONS,
+            }
+
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(self._embed_url(), json=payload)
+                resp.raise_for_status()
+
+            embedding = resp.json().get("embedding", {}).get("values", [])
+            if embedding:
+                logger.info(f"Embedding CAROUSEL gerado ({len(parts)} imgs) - {len(embedding)} dims")
+            return embedding or None
+
+        except Exception as e:
+            logger.error(f"Erro embedding carousel: {str(e)}")
+            return None
+
     async def generate_embedding(self, bookmark: dict) -> Optional[List[float]]:
         """
         Gera embedding para bookmark. Prioridade:
         1. Video multimodal (baixa + File API + embed)
-        2. Imagem multimodal (baixa + inline_data base64)
-        3. Texto (smart_title + tags + transcript)
+        2. Carousel multimodal (ate 6 imagens numa chamada)
+        3. Imagem unica multimodal
+        4. Texto (smart_title + tags + transcript)
         """
         cloud_video_url = bookmark.get('cloud_video_url')
         image_urls = bookmark.get('image_urls', [])
@@ -275,15 +330,23 @@ class EmbeddingService:
                 return embedding
             logger.warning("Embedding video falhou, tentando alternativas")
 
-        # 2. Imagem multimodal
+        # 2. Carousel multimodal (multiplas imagens)
+        if image_urls and isinstance(image_urls, list) and len(image_urls) > 1:
+            logger.info(f"Tentando embedding carousel ({len(image_urls)} imagens)...")
+            embedding = await self.embed_multiple_images(image_urls)
+            if embedding:
+                return embedding
+            logger.warning("Embedding carousel falhou, tentando imagem unica")
+
+        # 3. Imagem unica
         if image_urls and isinstance(image_urls, list) and len(image_urls) > 0:
-            logger.info("Tentando embedding multimodal (imagem)...")
+            logger.info("Tentando embedding multimodal (imagem unica)...")
             embedding = await self.embed_image(image_urls[0])
             if embedding:
                 return embedding
             logger.warning("Embedding imagem falhou, fallback texto")
 
-        # 3. Texto
+        # 4. Texto
         combined_text = self._build_text_from_bookmark(bookmark)
         if not combined_text:
             logger.warning("Nenhum conteudo pra embedding")
