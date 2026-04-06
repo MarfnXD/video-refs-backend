@@ -570,6 +570,10 @@ class ApifyService:
                 import json as _json
                 data = _json.loads(data)
 
+            # Debug: ver estrutura de media
+            print(f"🐦 media type: {type(data.get('media'))}, content: {str(data.get('media'))[:300]}")
+            print(f"🐦 extendedEntities type: {type(data.get('extendedEntities'))}, content: {str(data.get('extendedEntities'))[:300]}")
+
             # Campos do apidojo/tweet-scraper
             text = data.get("text") or data.get("fullText") or ""
 
