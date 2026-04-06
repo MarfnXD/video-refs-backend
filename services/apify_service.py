@@ -551,18 +551,21 @@ class ApifyService:
             client = self._get_next_client()
 
             # apidojo/tweet-scraper com startUrls (retorna dados mesmo com warning)
-            run = client.actor("apidojo/tweet-scraper").call(
-                run_input={
-                    "startUrls": [{"url": url}],
-                    "maxItems": 1,
-                    "addUserInfo": True,
-                },
-                timeout_secs=120
-            )
+            async def run_x_scraper(client):
+                run = client.actor("apidojo/tweet-scraper").call(
+                    run_input={
+                        "startUrls": [{"url": url}],
+                        "maxItems": 1,
+                        "addUserInfo": True,
+                    },
+                    timeout_secs=120
+                )
+                items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
+                if not items:
+                    raise ValueError("X/Twitter scraper nao retornou dados")
+                return items[0]
 
-            items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
-            if not items:
-                raise ValueError("X/Twitter scraper nao retornou dados")
+            data = await self._try_all_clients(run_x_scraper, "extract_x_tweet")
 
             data = items[0]
             # Se veio como string, parsear JSON
@@ -667,25 +670,25 @@ class ApifyService:
         print(f"🧵 Extraindo metadata do Threads: {url}")
 
         try:
-            client = self._get_next_client()
-
             # Extrair username e post ID da URL
-            import re as _re
-            username_match = _re.search(r'threads\.(?:com|net)/@([^/]+)', url)
-            post_id_match = _re.search(r'/post/([A-Za-z0-9_-]+)', url)
+            username_match = re.search(r'threads\.(?:com|net)/@([^/]+)', url)
+            post_id_match = re.search(r'/post/([A-Za-z0-9_-]+)', url)
             username = username_match.group(1) if username_match else ""
             post_id = post_id_match.group(1) if post_id_match else ""
 
-            run = client.actor("logical_scrapers/threads-post-scraper").call(
-                run_input={
-                    "post_urls": [url],
-                },
-                timeout_secs=120
-            )
+            async def run_threads_scraper(client):
+                run = client.actor("logical_scrapers/threads-post-scraper").call(
+                    run_input={
+                        "post_urls": [url],
+                    },
+                    timeout_secs=120
+                )
+                items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
+                if not items:
+                    raise ValueError("Threads scraper nao retornou dados")
+                return items[0]
 
-            items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
-            if not items:
-                raise ValueError("Threads scraper nao retornou dados")
+            data = await self._try_all_clients(run_threads_scraper, "extract_threads_post")
 
             data = items[0]
             if isinstance(data, str):
