@@ -565,6 +565,10 @@ class ApifyService:
                 raise ValueError("X/Twitter scraper nao retornou dados")
 
             data = items[0]
+            # Se veio como string, parsear JSON
+            if isinstance(data, str):
+                import json as _json
+                data = _json.loads(data)
 
             # Campos do apidojo/tweet-scraper
             text = data.get("text") or data.get("full_text") or ""
@@ -657,6 +661,9 @@ class ApifyService:
                 raise ValueError("Threads scraper nao retornou dados")
 
             data = items[0]
+            if isinstance(data, str):
+                import json as _json
+                data = _json.loads(data)
 
             # Campos com prefixo "thread." (formato logical_scrapers)
             text = data.get("thread.text") or data.get("text") or ""
