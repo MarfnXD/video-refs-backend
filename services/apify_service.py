@@ -754,10 +754,10 @@ class ApifyService:
                     import json as _json
                     media_data = _json.loads(media_data)
 
-                print(f"🧵 Media data keys: {list(media_data.keys()) if isinstance(media_data, dict) else type(media_data)}")
-                print(f"🧵 Media data: {str(media_data)[:500]}")
-                video_url = media_data.get("video_url") or media_data.get("videoUrl") or media_data.get("video")
-                image_url = media_data.get("image_url") or media_data.get("imageUrl") or media_data.get("image")
+                # Campos do igview-owner/threads-media-downloader
+                media_type = media_data.get("mediaType", "")
+                video_url = media_data.get("downloadUrl") if media_type == "video" else None
+                image_url = media_data.get("thumbnailUrl") or media_data.get("downloadUrl")
                 if not thumbnail_url:
                     thumbnail_url = image_url or media_data.get("profile_pic_url")
                 print(f"🧵 Media: video={bool(video_url)}, image={bool(image_url)}, thumb={bool(thumbnail_url)}")
