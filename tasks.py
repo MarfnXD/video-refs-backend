@@ -857,114 +857,119 @@ def cleanup_and_notify_task(self, previous_result: dict, bookmark_id: str, user_
 # AUTO-SYNC (cron job diário)
 # ============================================================================
 
+MAX_SYNC_RETRIES = 3  # Após 3 tentativas, para de tentar
+MAX_SYNC_BATCH = 5    # Máximo de bookmarks por sync (economiza créditos)
+
+
+def _get_sync_redis():
+    """Redis client síncrono para controle de retries do auto-sync"""
+    import redis as sync_redis
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    return sync_redis.from_url(redis_url)
+
+
 @celery_app.task(bind=True, name="tasks.auto_sync_incomplete_bookmarks_task")
 def auto_sync_incomplete_bookmarks_task(self):
     """
-    FASE 5: Auto-sync de bookmarks incompletos (cron job diário)
-    - Roda às 3h da manhã
-    - Processa TODOS os bookmarks incompletos de TODOS os usuários
-    - Paraleliza processamento (batch de 10 jobs simultâneos)
+    Auto-sync de bookmarks incompletos (cron job diário às 3h)
+    Proteções:
+    - Retry count via Redis (max 3 tentativas por bookmark)
+    - Após 3 falhas: marca failed com mensagem e para de tentar
+    - Máximo 5 bookmarks por sync (economiza créditos Apify)
+    - Só busca status failed/pending (não pega completed com dados parciais)
     """
     logger.info("🔄 Iniciando auto-sync diário de bookmarks incompletos")
 
     try:
-        # 1. Query para encontrar bookmarks incompletos
-        logger.info("🔍 Buscando bookmarks incompletos no Supabase...")
+        rc = _get_sync_redis()
 
-        # Query otimizada - considera múltiplos critérios de incompletude
-        query = supabase_client.table('bookmarks').select('id, url, user_id, metadata, auto_tags, cloud_video_url, video_transcript, visual_analysis')
-
-        # Filtros (OR logic):
-        # - Sem metadados básicos
-        # - Sem processamento de IA
-        # - Com vídeo na cloud mas sem análise multimodal
-        # - Status failed ou pending
-        incomplete_bookmarks = query.or_(
-            'metadata.is.null,'
-            'auto_tags.is.null,'
+        # 1. Buscar apenas bookmarks failed/pending
+        logger.info("🔍 Buscando bookmarks failed/pending no Supabase...")
+        incomplete_bookmarks = supabase_client.table('bookmarks').select(
+            'id, url, user_id, metadata, auto_tags, cloud_video_url, video_transcript, processing_status'
+        ).or_(
             'processing_status.eq.failed,'
-            'processing_status.eq.pending,'
-            'and(cloud_video_url.not.is.null,video_transcript.is.null)'
+            'processing_status.eq.pending'
         ).execute()
 
         bookmarks = incomplete_bookmarks.data if incomplete_bookmarks else []
-        total = len(bookmarks)
+        logger.info(f"📊 Encontrados {len(bookmarks)} bookmarks failed/pending")
 
-        logger.info(f"📊 Encontrados {total} bookmarks incompletos")
+        if not bookmarks:
+            logger.info("✅ Nenhum bookmark incompleto")
+            return {"success": True, "processed": 0, "skipped_max_retries": 0}
 
-        if total == 0:
-            logger.info("✅ Nenhum bookmark incompleto - auto-sync não necessário")
-            return {
-                "success": True,
-                "processed": 0,
-                "message": "Nenhum bookmark incompleto encontrado"
-            }
+        # 2. Filtrar por retry count
+        eligible = []
+        skipped_retries = 0
 
-        # 2. Processar em batches de 10 (evitar sobrecarga)
-        batch_size = 10
-        batches = [bookmarks[i:i + batch_size] for i in range(0, total, batch_size)]
-        total_batches = len(batches)
+        for bookmark in bookmarks:
+            bid = bookmark['id']
+            retry_key = f"sync_retry:{bid}"
+            retries = int(rc.get(retry_key) or 0)
 
-        logger.info(f"📦 Processando em {total_batches} batches de até {batch_size} bookmarks")
+            if retries >= MAX_SYNC_RETRIES:
+                logger.warning(f"💀 {bid[:8]}: {retries} retries atingido - desistindo")
+                # Atualizar erro no banco (para o usuário saber)
+                supabase_client.table('bookmarks').update({
+                    'error_message': f'Auto-sync desistiu após {retries} tentativas. Reprocessamento manual necessário.'
+                }).eq('id', bid).execute()
+                skipped_retries += 1
+                continue
+
+            eligible.append((bookmark, retries))
+
+        logger.info(f"📊 Elegíveis: {len(eligible)} | Max retries atingido: {skipped_retries}")
+
+        if not eligible:
+            return {"success": True, "processed": 0, "skipped_max_retries": skipped_retries}
+
+        # 3. Limitar batch
+        to_process = eligible[:MAX_SYNC_BATCH]
+        logger.info(f"⚙️ Processando {len(to_process)}/{len(eligible)} (cap: {MAX_SYNC_BATCH})")
 
         processed_count = 0
-        failed_count = 0
+        for bookmark, retries in to_process:
+            bid = bookmark['id']
+            url = bookmark['url']
+            user_id = bookmark['user_id']
 
-        for batch_idx, batch in enumerate(batches):
-            logger.info(f"⚙️ Processando batch {batch_idx + 1}/{total_batches} ({len(batch)} bookmarks)")
+            # Incrementar retry count (TTL 30 dias)
+            retry_key = f"sync_retry:{bid}"
+            new_count = rc.incr(retry_key)
+            rc.expire(retry_key, 30 * 86400)
+            logger.info(f"📝 {bid[:8]}: tentativa {new_count}/{MAX_SYNC_RETRIES} - {url[:50]}")
 
-            # Criar jobs em paralelo para este batch
-            jobs = []
-            for bookmark in batch:
-                bookmark_id = bookmark['id']
-                url = bookmark['url']
-                user_id = bookmark['user_id']
+            has_metadata = bookmark.get('metadata') is not None
+            has_ai = bool(bookmark.get('auto_tags'))
+            has_cloud_video = bool(bookmark.get('cloud_video_url'))
+            has_analysis = bool(bookmark.get('video_transcript'))
 
-                # Determinar o que processar
-                has_metadata = bookmark.get('metadata') is not None
-                has_ai = bookmark.get('auto_tags') is not None and len(bookmark.get('auto_tags', [])) > 0
-                has_cloud_video = bookmark.get('cloud_video_url') is not None and bookmark['cloud_video_url']
-                has_analysis = bookmark.get('video_transcript') is not None and bookmark['video_transcript']
+            try:
+                process_bookmark_complete_task.apply_async(
+                    kwargs={
+                        'bookmark_id': bid,
+                        'url': url,
+                        'user_id': user_id,
+                        'extract_metadata': not has_metadata,
+                        'analyze_video': has_cloud_video and not has_analysis,
+                        'process_ai': not has_ai,
+                        'upload_to_cloud': False,
+                    },
+                    retry=False
+                )
+                processed_count += 1
+            except Exception as e:
+                logger.error(f"❌ Erro ao enfileirar {bid[:8]}: {str(e)}")
 
-                # Configurar parâmetros
-                extract_metadata = not has_metadata
-                analyze_video = has_cloud_video and not has_analysis
-                process_ai = not has_ai
-                upload_to_cloud = False  # Não faz upload automático (economiza banda)
-
-                logger.info(f"📝 {bookmark_id}: metadata={has_metadata}, ai={has_ai}, cloud={has_cloud_video}, analysis={has_analysis}")
-
-                # Enfileirar job
-                try:
-                    job = process_bookmark_complete_task.apply_async(
-                        kwargs={
-                            'bookmark_id': bookmark_id,
-                            'url': url,
-                            'user_id': user_id,
-                            'extract_metadata': extract_metadata,
-                            'analyze_video': analyze_video,
-                            'process_ai': process_ai,
-                            'upload_to_cloud': upload_to_cloud,
-                        },
-                        retry=False  # Não retry automático (vai tentar no próximo dia)
-                    )
-                    jobs.append(job)
-                    processed_count += 1
-                except Exception as e:
-                    logger.error(f"❌ Erro ao enfileirar {bookmark_id}: {str(e)}")
-                    failed_count += 1
-
-            logger.info(f"✅ Batch {batch_idx + 1} enfileirado: {len(jobs)} jobs criados")
-
-        logger.info(f"🎉 Auto-sync concluído: {processed_count} processados, {failed_count} falharam")
+        logger.info(f"🎉 Auto-sync: {processed_count} enfileirados, {skipped_retries} desistidos")
 
         return {
             "success": True,
-            "total_found": total,
+            "total_found": len(bookmarks),
             "processed": processed_count,
-            "failed": failed_count,
-            "batches": total_batches,
-            "message": f"Auto-sync concluído: {processed_count}/{total} bookmarks enfileirados"
+            "skipped_max_retries": skipped_retries,
+            "message": f"Auto-sync: {processed_count} enfileirados, {skipped_retries} desistidos"
         }
 
     except Exception as e:
