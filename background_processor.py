@@ -122,7 +122,17 @@ async def process_bookmark_background(
         cloud_video_url = None
         temp_video_path = None
 
-        if upload_to_cloud and metadata:
+        # Detectar se post tem video (carrosseis/fotos nao tem)
+        has_video = True
+        if metadata:
+            duration = metadata.get('duration', '')
+            if not duration or duration == '' or duration == '0':
+                # Sem duracao = provavelmente imagem/carrossel
+                if 'instagram' in url.lower():
+                    has_video = False
+                    logger.info(f"📸 Post Instagram sem video (carrossel/foto) - pulando download")
+
+        if upload_to_cloud and metadata and has_video:
             try:
                 # 3.1: Extrair URL direta do vídeo (Apify)
                 logger.info(f"📥 Extraindo URL direta do vídeo...")
