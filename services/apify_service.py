@@ -651,52 +651,43 @@ class ApifyService:
             username = username_match.group(1) if username_match else ""
             post_id = post_id_match.group(1) if post_id_match else ""
 
-            # Tentar com directUrls primeiro, fallback pra username mode
-            try:
-                run = client.actor("automation-lab/threads-scraper").call(
-                    run_input={
-                        "usernames": [username] if username else [],
-                        "directUrls": [url],
-                        "resultsLimit": 1,
-                        "maxPosts": 1,
-                    },
-                    timeout_secs=120
-                )
-            except Exception:
-                # Fallback: curious_coder actor
-                run = client.actor("curious_coder/threads-scraper").call(
-                    run_input={
-                        "directUrls": [url],
-                        "resultsLimit": 1,
-                    },
-                    timeout_secs=120
-                )
+            run = client.actor("logical_scrapers/threads-post-scraper").call(
+                run_input={
+                    "post_urls": [url],
+                },
+                timeout_secs=120
+            )
 
             items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
             if not items:
                 raise ValueError("Threads scraper nao retornou dados")
 
-            # Filtrar pelo post_id se tiver multiplos resultados
             data = items[0]
-            if post_id and len(items) > 1:
-                for item in items:
-                    item_url = item.get("url", "") or item.get("postUrl", "")
-                    if post_id in item_url:
-                        data = item
-                        break
 
-            text = data.get("text") or data.get("caption") or ""
-            author = data.get("username") or data.get("ownerUsername") or username or data.get("author", {}).get("username", "")
+            # Campos com prefixo "thread." (formato logical_scrapers)
+            text = data.get("thread.text") or data.get("text") or ""
+            author = data.get("thread.username") or data.get("username") or username
 
             hashtags = re.findall(r'#\w+', text)
 
-            # Thumbnail: tentar multiplos campos de midia
+            # Thumbnail: buscar em replies com imagens
             thumbnail_url = None
-            media_urls = data.get("mediaUrls") or data.get("imageUrls") or data.get("media") or []
-            if isinstance(media_urls, list) and media_urls:
-                thumbnail_url = media_urls[0] if isinstance(media_urls[0], str) else media_urls[0].get("url", "")
-            if not thumbnail_url:
-                thumbnail_url = data.get("thumbnailUrl") or data.get("displayUrl") or data.get("imageUrl")
+            # Replies com comentarios reais
+            top_comments = []
+            replies = data.get("replies") or []
+            for r in replies[:50]:
+                reply_text = r.get("text", "")
+                if reply_text:
+                    top_comments.append(Comment(
+                        text=reply_text,
+                        author=r.get("username", ""),
+                        likes=r.get("like_count", 0),
+                    ))
+                # Pegar thumbnail da primeira imagem encontrada nas replies
+                if not thumbnail_url:
+                    reply_images = r.get("images") or []
+                    if reply_images:
+                        thumbnail_url = reply_images[0]
 
             return VideoMetadata(
                 url=url,
@@ -704,15 +695,15 @@ class ApifyService:
                 title=text[:100] + ("..." if len(text) > 100 else ""),
                 description=text,
                 hashtags=hashtags,
-                views=data.get("viewCount"),
-                likes=data.get("likeCount") or data.get("likesCount"),
-                comments_count=data.get("replyCount") or data.get("commentsCount"),
-                top_comments=[],
+                views=data.get("thread.view_count") or data.get("viewCount"),
+                likes=data.get("thread.like_count") or data.get("likeCount"),
+                comments_count=data.get("thread.reply_count") or data.get("replyCount") or len(replies),
+                top_comments=top_comments,
                 thumbnail_url=thumbnail_url,
                 duration=None,
                 author=author,
                 author_url=f"https://www.threads.com/@{author}" if author else None,
-                published_at=data.get("timestamp") or data.get("createdAt") or data.get("publishedAt"),
+                published_at=data.get("thread.published_on") or data.get("timestamp"),
             )
 
         except Exception as e:
