@@ -124,13 +124,24 @@ async def process_bookmark_background(
 
         # Detectar se post tem video (carrosseis/fotos nao tem)
         has_video = True
+        image_urls = []
         if metadata:
             duration = metadata.get('duration', '')
             if not duration or duration == '' or duration == '0':
-                # Sem duracao = provavelmente imagem/carrossel
                 if 'instagram' in url.lower():
                     has_video = False
-                    logger.info(f"📸 Post Instagram sem video (carrossel/foto) - pulando download")
+                    # Coletar URLs de imagens pra analise Gemini
+                    thumbnail = metadata.get('thumbnail_url', '')
+                    if thumbnail:
+                        image_urls.append(thumbnail)
+                    # Se tem carousel_items no raw response
+                    if apify_raw_response and isinstance(apify_raw_response, dict):
+                        carousel = apify_raw_response.get('childPosts') or apify_raw_response.get('sidecarMediaResources') or apify_raw_response.get('images') or []
+                        for item in carousel[:6]:
+                            img_url = item.get('displayUrl') or item.get('url') or item.get('src') or ''
+                            if img_url and img_url not in image_urls:
+                                image_urls.append(img_url)
+                    logger.info(f"📸 Post Instagram sem video - {len(image_urls)} imagens coletadas pra analise")
 
         if upload_to_cloud and metadata and has_video:
             try:
@@ -186,6 +197,19 @@ async def process_bookmark_background(
             except Exception as e:
                 logger.error(f"❌ Erro no fluxo de upload/análise: {str(e)}")
                 # Não bloqueia - continua sem vídeo na cloud
+
+        # 3B: Se nao tem video mas tem imagens (carousel/foto), analisar com Gemini
+        if not has_video and image_urls and analyze_video:
+            try:
+                logger.info(f"🖼️ Analisando {len(image_urls)} imagens com Gemini Flash 2.5...")
+                gemini_analysis = await gemini_service.analyze_images(
+                    image_urls=image_urls,
+                    user_context=user_context
+                )
+                if gemini_analysis:
+                    logger.info(f"✅ Analise de imagens completa! {len(gemini_analysis.get('visual_analysis', ''))} chars")
+            except Exception as e:
+                logger.error(f"❌ Erro ao analisar imagens com Gemini: {str(e)}")
 
         # ============================================================
         # PASSO 4: Processar com IA (Claude)
@@ -391,6 +415,7 @@ async def process_bookmark_background(
                 'video_transcript': gemini_analysis.get('transcript') if gemini_analysis else None,
                 'visual_analysis': gemini_analysis.get('visual_analysis') if gemini_analysis else None,
                 'cloud_video_url': update_data.get('cloud_video_url'),
+                'image_urls': image_urls if image_urls else [],
             }
 
             embedding = await embedding_service.generate_embedding(embedding_data)

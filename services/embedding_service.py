@@ -161,29 +161,77 @@ class EmbeddingService:
 
         return " | ".join(filter(None, parts))
 
-    async def generate_embedding(self, bookmark: dict) -> Optional[List[float]]:
+    async def embed_image(self, image_url: str) -> Optional[List[float]]:
         """
-        Gera embedding para um bookmark. Usa video multimodal se disponivel,
-        senao faz fallback para texto.
+        Gera embedding multimodal de uma imagem via Gemini Embed 2.
 
         Args:
-            bookmark: Dict com campos do bookmark (smart_title, auto_tags,
-                      cloud_video_url, video_transcript, etc)
+            image_url: URL publica da imagem
 
         Returns:
             Lista de 768 floats ou None
         """
-        cloud_video_url = bookmark.get('cloud_video_url')
+        if not self.is_available or not image_url:
+            return None
 
-        # Tentar embedding multimodal (video direto) primeiro
+        try:
+            url = f"{GEMINI_API_BASE}/models/{MODEL_NAME}:embedContent?key={self.api_key}"
+
+            payload = {
+                "model": f"models/{MODEL_NAME}",
+                "content": {
+                    "parts": [{
+                        "fileData": {
+                            "mimeType": "image/jpeg",
+                            "fileUri": image_url
+                        }
+                    }]
+                },
+                "outputDimensionality": OUTPUT_DIMENSIONS
+            }
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+
+            data = response.json()
+            embedding = data.get("embedding", {}).get("values", [])
+
+            if embedding:
+                logger.info(f"Embedding IMAGEM gerado - {len(embedding)} dims")
+            return embedding or None
+
+        except Exception as e:
+            logger.error(f"Erro ao gerar embedding imagem: {str(e)}")
+            return None
+
+    async def generate_embedding(self, bookmark: dict) -> Optional[List[float]]:
+        """
+        Gera embedding para um bookmark. Prioridade:
+        1. Video multimodal (se tem cloud_video_url)
+        2. Imagem multimodal (se tem image_urls de carousel)
+        3. Texto (smart_title + tags + transcript)
+        """
+        cloud_video_url = bookmark.get('cloud_video_url')
+        image_urls = bookmark.get('image_urls', [])
+
+        # 1. Tentar embedding multimodal (video direto)
         if cloud_video_url:
             logger.info("Tentando embedding multimodal (video direto)...")
             embedding = await self.embed_video(cloud_video_url)
             if embedding:
                 return embedding
-            logger.warning("Embedding video falhou, fazendo fallback para texto")
+            logger.warning("Embedding video falhou, tentando alternativas")
 
-        # Fallback: embedding de texto
+        # 2. Tentar embedding multimodal (imagem)
+        if image_urls and isinstance(image_urls, list) and len(image_urls) > 0:
+            logger.info(f"Tentando embedding multimodal (imagem)...")
+            embedding = await self.embed_image(image_urls[0])
+            if embedding:
+                return embedding
+            logger.warning("Embedding imagem falhou, fazendo fallback para texto")
+
+        # 3. Fallback: embedding de texto
         combined_text = self._build_text_from_bookmark(bookmark)
         if not combined_text:
             logger.warning("Nenhum conteudo disponivel para embedding")

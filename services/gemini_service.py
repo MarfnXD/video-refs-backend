@@ -95,6 +95,71 @@ class GeminiService:
             logger.error(f"❌ Erro na análise com Gemini: {str(e)}")
             return None
 
+    async def analyze_images(
+        self,
+        image_urls: list,
+        user_context: Optional[str] = None
+    ) -> Optional[Dict]:
+        """
+        Analisa imagens (carousel Instagram, posts de foto) usando Gemini Flash 2.5.
+        Aceita ate 6 imagens por request.
+        """
+        if not self.client:
+            logger.error("Gemini client nao inicializado")
+            return None
+
+        if not image_urls:
+            return None
+
+        try:
+            # Limitar a 6 imagens (limite do Gemini)
+            urls = image_urls[:6]
+            logger.info(f"🖼️ Analisando {len(urls)} imagens com Gemini Flash 2.5")
+
+            prompt = f"""Analise estas {len(urls)} imagens de um post Instagram.
+
+Descreva CADA imagem individualmente:
+
+Imagem 1:
+- O que voce ve: [descreva objetos, pessoas, cenario, cores, estilo visual]
+- Texto visivel: [se houver texto, transcreva]
+
+Imagem 2:
+- O que voce ve: [...]
+- Texto visivel: [...]
+
+(continue para cada imagem)
+
+Depois, faca um RESUMO GERAL do post:
+- Tema principal
+- Estilo visual dominante
+- Relacao entre as imagens (sequencia, antes/depois, colecao, etc)
+
+Seja DESCRITIVO e OBJETIVO."""
+
+            if user_context:
+                prompt += f"\n\nContexto do usuario: \"{user_context}\""
+
+            output = self.client.run(
+                self.model_version,
+                input={
+                    "prompt": prompt,
+                    "images": urls,
+                    "temperature": 0.3,
+                    "max_output_tokens": 8192,
+                    "top_p": 0.9,
+                }
+            )
+
+            result = self._parse_gemini_output(output)
+            if result:
+                logger.info(f"✅ {len(urls)} imagens analisadas com sucesso")
+            return result
+
+        except Exception as e:
+            logger.error(f"❌ Erro na analise de imagens com Gemini: {str(e)}")
+            return None
+
     def _build_analysis_prompt(self, user_context: Optional[str] = None) -> str:
         """
         Monta prompt SIMPLES e OBJETIVO para análise de vídeo
