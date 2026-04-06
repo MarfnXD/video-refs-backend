@@ -550,42 +550,36 @@ class ApifyService:
         try:
             client = self._get_next_client()
 
-            # Tentar twitter-scraper-lite primeiro (suporta tweets individuais)
-            # Fallback pra tweet-scraper se nao disponivel
-            actor_name = "apidojo/twitter-scraper-lite"
-            try:
-                run = client.actor(actor_name).call(
-                    run_input={
-                        "startUrls": [{"url": url}],
-                        "maxItems": 1,
-                        "addUserInfo": True,
-                    },
-                    timeout_secs=120
-                )
-            except Exception:
-                # Fallback: tweet-scraper com searchTerms
-                import re as _re
-                tweet_id_match = _re.search(r'/status/(\d+)', url)
-                actor_name = "apidojo/tweet-scraper"
-                run = client.actor(actor_name).call(
-                    run_input={
-                        "searchTerms": [url],
-                        "maxItems": 1,
-                        "addUserInfo": True,
-                    },
-                    timeout_secs=120
-                )
+            # apidojo/tweet-scraper com startUrls (retorna dados mesmo com warning)
+            run = client.actor("apidojo/tweet-scraper").call(
+                run_input={
+                    "startUrls": [{"url": url}],
+                    "maxItems": 1,
+                    "addUserInfo": True,
+                },
+                timeout_secs=120
+            )
 
             items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
             if not items:
-                raise ValueError(f"X/Twitter scraper ({actor_name}) nao retornou dados")
+                raise ValueError("X/Twitter scraper nao retornou dados")
 
             data = items[0]
 
-            # Campos camelCase (formato Tweet Scraper V2)
+            # Campos do apidojo/tweet-scraper
             text = data.get("text") or data.get("full_text") or ""
-            author_obj = data.get("author", {})
-            author = author_obj.get("userName") or author_obj.get("screen_name") or data.get("user", {}).get("screen_name", "")
+            # Author: tentar varios formatos
+            author_obj = data.get("author") or {}
+            if isinstance(author_obj, dict):
+                author = author_obj.get("userName") or author_obj.get("screen_name") or ""
+            else:
+                author = ""
+            # Fallback: extrair username da URL ou twitterUrl
+            if not author:
+                tweet_url = data.get("twitterUrl") or data.get("url") or url
+                import re as _re
+                user_match = _re.search(r'(?:x\.com|twitter\.com)/([^/]+)/status', tweet_url)
+                author = user_match.group(1) if user_match else ""
 
             hashtags = re.findall(r'#\w+', text)
 
