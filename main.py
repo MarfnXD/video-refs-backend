@@ -132,12 +132,37 @@ async def debug_apify_status():
     """Temporário: verifica estado dos tokens Apify"""
     import os
     token_raw = os.getenv("APIFY_TOKEN", "")
+
+    # Checar blacklist no Redis
+    blacklisted = []
+    try:
+        rc = await apify_service.get_redis_client()
+        for i in range(len(apify_service.clients)):
+            is_dead = await rc.exists(f"apify:dead_token:{i}")
+            if is_dead:
+                blacklisted.append(i)
+    except Exception as e:
+        blacklisted = [f"redis_error: {str(e)[:50]}"]
+
+    # Checar cache pra URL de teste
+    cache_keys = []
+    try:
+        rc = await apify_service.get_redis_client()
+        for key in ["instagram:https://www.instagram.com/p/DIMT3feMPNL/",
+                     "instagram:https://www.instagram.com/p/DIMb1r0sRvK/"]:
+            val = await rc.get(key)
+            cache_keys.append({"key": key, "cached": bool(val), "preview": str(val)[:100] if val else None})
+    except: pass
+
     return {
         "token_configured": bool(token_raw),
         "token_prefix": token_raw[:15] + "..." if token_raw else "EMPTY",
         "tokens_count": len(apify_service.apify_tokens),
         "clients_count": len(apify_service.clients),
         "current_index": apify_service._current_client_index,
+        "apify_token_attr": bool(apify_service.apify_token),
+        "blacklisted_tokens": blacklisted,
+        "cache_check": cache_keys,
     }
 
 
