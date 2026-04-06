@@ -739,6 +739,38 @@ class ApifyService:
 
             title = text[:100] + "..." if len(text) > 100 else text if text else "Threads Post"
 
+            # Extrair video/imagem do post via media downloader
+            try:
+                async def run_media_downloader(client):
+                    run = client.actor("igview-owner/threads-media-downloader").call(
+                        run_input={"urls": [url]},
+                        timeout_secs=60
+                    )
+                    items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
+                    return items[0] if items else {}
+
+                media_data = await self._try_all_clients(run_media_downloader, "threads_media_download")
+                if isinstance(media_data, str):
+                    import json as _json
+                    media_data = _json.loads(media_data)
+
+                video_url = media_data.get("video_url") or media_data.get("videoUrl")
+                image_url = media_data.get("image_url") or media_data.get("imageUrl")
+                if not thumbnail_url:
+                    thumbnail_url = image_url or media_data.get("profile_pic_url")
+                print(f"🧵 Media: video={bool(video_url)}, image={bool(image_url)}, thumb={bool(thumbnail_url)}")
+            except Exception as e:
+                print(f"⚠️ Media downloader falhou (nao bloqueia): {str(e)}")
+                video_url = None
+
+            # Salvar raw response com video_url pra uso no background_processor
+            self.last_raw_response = data
+            if video_url:
+                if not isinstance(self.last_raw_response, dict):
+                    self.last_raw_response = {}
+                self.last_raw_response['video_url'] = video_url
+                self.last_raw_response['image_url'] = image_url
+
             return VideoMetadata(
                 url=url,
                 platform=Platform.THREADS,
