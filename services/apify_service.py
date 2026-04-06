@@ -142,7 +142,7 @@ class ApifyService:
             return Platform.INSTAGRAM
         elif "x.com" in url or "twitter.com" in url:
             return Platform.X
-        elif "threads.net" in url:
+        elif "threads.net" in url or "threads.com" in url:
             return Platform.THREADS
         else:
             raise ValueError(f"Plataforma não suportada para URL: {url}")
