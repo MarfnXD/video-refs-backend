@@ -566,8 +566,6 @@ class ApifyService:
                 return items[0]
 
             data = await self._try_all_clients(run_x_scraper, "extract_x_tweet")
-
-            data = items[0]
             # Se veio como string, parsear JSON
             if isinstance(data, str):
                 import json as _json
@@ -690,8 +688,6 @@ class ApifyService:
                 return items[0]
 
             data = await self._try_all_clients(run_threads_scraper, "extract_threads_post")
-
-            data = items[0]
             if isinstance(data, str):
                 import json as _json
                 data = _json.loads(data)
