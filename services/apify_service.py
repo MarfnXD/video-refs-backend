@@ -133,6 +133,38 @@ class ApifyService:
             pass
         return None
 
+    def _clean_url(self, url: str) -> str:
+        """Limpa URL removendo parametros de tracking e normalizando formato."""
+        from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
+
+        parsed = urlparse(url)
+
+        # Threads: remover todos os parametros de tracking (xmt, utm_*, slof, source_surface)
+        if "threads.com" in parsed.netloc or "threads.net" in parsed.netloc:
+            # Manter so o path, sem query params
+            return urlunparse((parsed.scheme, parsed.netloc, parsed.path, '', '', ''))
+
+        # X.com: normalizar x.com/i/status/ID pra x.com/_/status/ID
+        # O formato /i/ e um redirect interno do X que o Apify nao entende
+        if "x.com" in parsed.netloc or "twitter.com" in parsed.netloc:
+            path = parsed.path
+            # x.com/i/status/123 -> precisa manter so o status ID
+            if '/i/status/' in path:
+                # Extrair status ID e reconstruir como URL limpa
+                status_match = re.search(r'/status/(\d+)', path)
+                if status_match:
+                    status_id = status_match.group(1)
+                    return f"https://x.com/i/status/{status_id}"
+            # Remover query params de tracking
+            return urlunparse((parsed.scheme, parsed.netloc, parsed.path, '', '', ''))
+
+        # Instagram: remover igsh e outros params
+        if "instagram.com" in parsed.netloc:
+            # Manter so o path
+            return urlunparse((parsed.scheme, parsed.netloc, parsed.path, '', '', ''))
+
+        return url
+
     def detect_platform(self, url: str) -> Platform:
         if "youtube.com" in url or "youtu.be" in url:
             return Platform.YOUTUBE
@@ -528,6 +560,7 @@ class ApifyService:
         )
 
     async def extract_metadata(self, url: str) -> VideoMetadata:
+        url = self._clean_url(url)
         platform = self.detect_platform(url)
 
         if platform == Platform.YOUTUBE:
