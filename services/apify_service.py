@@ -679,6 +679,7 @@ class ApifyService:
             async def run_threads_scraper(client):
                 run = client.actor("logical_scrapers/threads-post-scraper").call(
                     run_input={
+                        "startUrls": [{"url": url}],
                         "post_urls": [url],
                     },
                     timeout_secs=120
