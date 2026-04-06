@@ -160,11 +160,39 @@ async def process_bookmark_background(
                 logger.info(f"📥 Extraindo URL direta do vídeo...")
 
                 # Detectar plataforma e extrair URL de download
+                # OTIMIZAÇÃO: Reaproveita raw response do Passo 2 quando possível
+                # (evita chamar Apify 2x pro mesmo vídeo)
                 download_info = None
-                if 'instagram' in url.lower():
-                    download_info = await apify_service.extract_video_download_url_instagram(url)
-                elif 'tiktok' in url.lower():
-                    download_info = await apify_service.extract_video_download_url_tiktok(url)
+                if 'tiktok' in url.lower():
+                    # TikTok: raw response já tem video.downloadAddr
+                    if apify_raw_response and isinstance(apify_raw_response, dict) and "video" in apify_raw_response:
+                        video_data = apify_raw_response["video"]
+                        video_url = video_data.get("downloadAddr") or video_data.get("playAddr")
+                        if video_url:
+                            duration = apify_raw_response.get("videoMeta", {}).get("duration", 0)
+                            download_info = {
+                                "download_url": video_url,
+                                "file_size_mb": round((duration / 10) * 1.0, 2) if duration else None,
+                                "quality": "original",
+                                "expires_in_hours": 6,
+                            }
+                            logger.info(f"♻️ TikTok: reusando videoUrl do raw response (sem chamada extra)")
+                    if not download_info:
+                        download_info = await apify_service.extract_video_download_url_tiktok(url)
+                elif 'instagram' in url.lower():
+                    # Instagram: raw response já tem videoUrl
+                    if apify_raw_response and isinstance(apify_raw_response, dict) and apify_raw_response.get("videoUrl"):
+                        video_url = apify_raw_response["videoUrl"]
+                        duration = apify_raw_response.get("videoDuration", 0)
+                        download_info = {
+                            "download_url": video_url,
+                            "file_size_mb": round((duration / 10) * 1.5, 2) if duration else None,
+                            "quality": "original",
+                            "expires_in_hours": 2,
+                        }
+                        logger.info(f"♻️ Instagram: reusando videoUrl do raw response (sem chamada extra)")
+                    if not download_info:
+                        download_info = await apify_service.extract_video_download_url_instagram(url)
                 elif 'youtube' in url.lower() or 'youtu.be' in url.lower():
                     download_info = await apify_service.extract_video_download_url_youtube(url)
 

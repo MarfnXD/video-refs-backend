@@ -274,7 +274,18 @@ def extract_metadata_task(self, bookmark_id: str, url: str, user_id: str):
             Platform=update_data['platform']
         )
 
-        # 4. Retornar dados para próxima task
+        # 4. Extrair video_download_url do raw response (evita 2a chamada Apify)
+        video_download_url = None
+        raw = apify_service.last_raw_response
+        if raw and isinstance(raw, dict):
+            # TikTok: video.downloadAddr
+            if raw.get("video"):
+                video_download_url = raw["video"].get("downloadAddr") or raw["video"].get("playAddr")
+            # Instagram: videoUrl
+            elif raw.get("videoUrl"):
+                video_download_url = raw["videoUrl"]
+
+        # 5. Retornar dados para próxima task
         return {
             "bookmark_id": bookmark_id,
             "url": url,
@@ -291,7 +302,8 @@ def extract_metadata_task(self, bookmark_id: str, url: str, user_id: str):
                 } for c in (metadata.comments or [])[:200]  # Top 200 comments
             ],
             "cloud_thumbnail_url": cloud_thumbnail_url,
-            "platform": update_data['platform']
+            "platform": update_data['platform'],
+            "video_download_url": video_download_url,
         }
 
     except Exception as e:
@@ -330,16 +342,18 @@ def analyze_video_gemini_task(self, previous_result: dict, bookmark_id: str, url
         if 'cloud_video_url' in previous_result and previous_result['cloud_video_url']:
             video_url_for_analysis = previous_result['cloud_video_url']
             logger.debug(f"Usando vídeo da cloud: {video_url_for_analysis[:60]}")
+        elif previous_result.get('video_download_url'):
+            # Reusa URL extraída na task anterior (evita 2a chamada Apify)
+            video_url_for_analysis = previous_result['video_download_url']
+            logger.info(f"♻️ Reusando video_download_url do pipeline (sem chamada extra Apify)")
         else:
-            # Baixar vídeo temporariamente via Apify
-            logger.debug("Baixando vídeo temporário via Apify")
+            # Fallback: Baixar vídeo via Apify (só se pipeline não passou a URL)
+            logger.debug("Baixando vídeo temporário via Apify (fallback)")
             loop = asyncio.get_event_loop()
 
-            # Detectar plataforma
             from models import Platform
             platform = apify_service.detect_platform(url)
 
-            # Extrair URL direta do vídeo
             if platform == Platform.YOUTUBE:
                 video_data = loop.run_until_complete(
                     apify_service.extract_video_download_url_youtube(url, quality="720p")
@@ -580,33 +594,38 @@ def upload_to_cloud_task(self, previous_result: dict, bookmark_id: str, user_id:
         if not url:
             raise Exception("URL não disponível para upload de vídeo")
 
-        # 1. Baixar vídeo via Apify
-        logger.info("⬇️ Baixando vídeo via Apify...")
+        # 1. Obter URL de download do vídeo
+        download_url = previous_result.get('video_download_url')
 
-        loop = asyncio.get_event_loop()
-        from models import Platform
-        platform = apify_service.detect_platform(url)
-
-        # Extrair URL direta
-        if platform == Platform.YOUTUBE:
-            video_data = loop.run_until_complete(
-                apify_service.extract_video_download_url_youtube(url, quality="720p")
-            )
-        elif platform == Platform.INSTAGRAM:
-            video_data = loop.run_until_complete(
-                apify_service.extract_video_download_url_instagram(url, quality="720p")
-            )
-        elif platform == Platform.TIKTOK:
-            video_data = loop.run_until_complete(
-                apify_service.extract_video_download_url_tiktok(url, quality="720p")
-            )
+        if download_url:
+            logger.info(f"♻️ Reusando video_download_url do pipeline (sem chamada extra Apify)")
         else:
-            raise Exception(f"Plataforma não suportada: {platform}")
+            # Fallback: buscar via Apify (só se pipeline não passou a URL)
+            logger.info("⬇️ Baixando URL via Apify (fallback)...")
+            loop = asyncio.get_event_loop()
+            from models import Platform
+            platform = apify_service.detect_platform(url)
 
-        if not video_data or not video_data.get('download_url'):
-            raise Exception("Falha ao extrair URL do vídeo")
+            if platform == Platform.YOUTUBE:
+                video_data = loop.run_until_complete(
+                    apify_service.extract_video_download_url_youtube(url, quality="720p")
+                )
+            elif platform == Platform.INSTAGRAM:
+                video_data = loop.run_until_complete(
+                    apify_service.extract_video_download_url_instagram(url, quality="720p")
+                )
+            elif platform == Platform.TIKTOK:
+                video_data = loop.run_until_complete(
+                    apify_service.extract_video_download_url_tiktok(url, quality="720p")
+                )
+            else:
+                raise Exception(f"Plataforma não suportada: {platform}")
 
-        download_url = video_data['download_url']
+            if not video_data or not video_data.get('download_url'):
+                raise Exception("Falha ao extrair URL do vídeo")
+
+            download_url = video_data['download_url']
+
         logger.info(f"✅ URL obtida: {download_url[:80]}...")
 
         # 2. Baixar vídeo para arquivo temporário

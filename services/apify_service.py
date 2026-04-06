@@ -64,51 +64,65 @@ class ApifyService:
         self._current_client_index = (self._current_client_index + 1) % len(self.clients)
         return client
 
+    async def _is_token_dead(self, token_index: int) -> bool:
+        """Verifica se um token está marcado como morto no Redis (TTL 24h)"""
+        try:
+            rc = await self.get_redis_client()
+            return bool(await rc.exists(f"apify:dead_token:{token_index}"))
+        except Exception:
+            return False
+
+    async def _mark_token_dead(self, token_index: int) -> None:
+        """Marca um token como morto no Redis por 24h"""
+        try:
+            rc = await self.get_redis_client()
+            await rc.setex(f"apify:dead_token:{token_index}", 86400, "1")
+            print(f"💀 Token #{token_index + 1} marcado como morto por 24h no Redis")
+        except Exception as e:
+            print(f"⚠️ Erro ao marcar token morto no Redis: {e}")
+
     async def _try_all_clients(self, operation_func, operation_name: str = "operação"):
         """
         Tenta executar uma operação com todos os clientes Apify até conseguir.
-        Se um token atingir o limite mensal, tenta automaticamente o próximo.
-
-        Args:
-            operation_func: Função async que recebe ApifyClient e retorna o resultado
-            operation_name: Nome da operação para logs
-
-        Returns:
-            Resultado da operação bem-sucedida
-
-        Raises:
-            ValueError: Se TODOS os tokens falharem
+        Pula tokens marcados como mortos no Redis (TTL 24h).
+        Se um token atingir o limite mensal, marca como morto e tenta o próximo.
         """
         if not self.clients:
             raise ValueError("Nenhum APIFY_TOKEN configurado")
 
         last_error = None
-        attempts = len(self.clients)  # Tenta todos os tokens disponíveis
+        tried = 0
 
-        for attempt in range(attempts):
+        for _ in range(len(self.clients)):
+            token_index = self._current_client_index
+
+            # Pula tokens mortos (blacklist no Redis)
+            if await self._is_token_dead(token_index):
+                print(f"⏭️ Token #{token_index + 1}/{len(self.clients)} em blacklist - pulando")
+                self._current_client_index = (self._current_client_index + 1) % len(self.clients)
+                continue
+
             try:
                 client = self._get_next_client()
-                print(f"🔄 Tentativa {attempt + 1}/{attempts} para {operation_name}")
+                tried += 1
+                print(f"🔄 Tentativa {tried} para {operation_name}")
 
                 result = await operation_func(client)
-                print(f"✅ {operation_name} bem-sucedida com token #{self._current_client_index}/{len(self.clients)}")
+                print(f"✅ {operation_name} bem-sucedida")
                 return result
 
             except Exception as e:
                 error_msg = str(e).lower()
 
-                # Detecta erro de limite mensal
                 if "monthly usage" in error_msg or "hard limit" in error_msg or "limit exceeded" in error_msg:
-                    print(f"⚠️ Token #{self._current_client_index}/{len(self.clients)} atingiu limite mensal - tentando próximo token...")
+                    await self._mark_token_dead(token_index)
                     last_error = e
                     continue
 
-                # Outros erros (não relacionados a limite) - falha imediatamente
-                print(f"❌ Erro inesperado em {operation_name}: {str(e)}")
+                print(f"❌ Erro em {operation_name}: {str(e)}")
                 raise
 
-        # Se chegou aqui, TODOS os tokens falharam
-        print(f"❌ TODOS os {attempts} tokens Apify atingiram limite mensal!")
+        print(f"❌ TODOS os {len(self.clients)} tokens Apify esgotados ou em blacklist!")
         raise ValueError(f"Todos os tokens Apify esgotados. Último erro: {str(last_error)}")
 
     async def get_redis_client(self):
@@ -315,6 +329,9 @@ class ApifyService:
 
             # Tenta com todos os tokens disponíveis até conseguir
             data = await self._try_all_clients(run_tiktok_scraper, "extract_tiktok")
+
+            # Salva resposta bruta (inclui video.downloadAddr pra reuso no upload)
+            self.last_raw_response = data
 
             # Extrair comentários se disponíveis (ordenados por likes)
             top_comments = []
