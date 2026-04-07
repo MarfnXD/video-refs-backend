@@ -243,7 +243,7 @@ async def process_bookmark_background(
                         _cmd = ["yt-dlp", "-f", "best[ext=mp4]/best", "--no-warnings", "-o", _tmp_path]
                         if yt_proxy:
                             _cmd.extend(["--proxy", yt_proxy])
-                        _cmd.append(video_download_url)
+                        _cmd.append(url)  # URL original do YouTube (nao a do googlevideo)
                         logger.info(f"🎬 YouTube: baixando via yt-dlp+proxy direto...")
                         _result = subprocess.run(_cmd, capture_output=True, text=True, timeout=300)
                         if _result.returncode == 0 and os.path.exists(_tmp_path) and os.path.getsize(_tmp_path) > 10000:
