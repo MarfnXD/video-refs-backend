@@ -233,10 +233,14 @@ async def process_bookmark_background(
                     # 3.2: Download + Upload para Supabase Storage
                     logger.info(f"☁️ Baixando e fazendo upload para Supabase Storage...")
 
+                    # YouTube precisa de proxy residencial pro download
+                    yt_proxy = apify_service._get_apify_proxy_url() if ('youtube' in url.lower() or 'youtu.be' in url.lower()) else None
+
                     upload_result = await video_storage_service.download_and_upload_video(
                         video_url=video_download_url,
                         user_id=user_id,
-                        bookmark_id=bookmark_id
+                        bookmark_id=bookmark_id,
+                        proxy_url=yt_proxy,
                     )
 
                     if upload_result:

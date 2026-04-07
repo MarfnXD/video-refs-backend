@@ -34,7 +34,8 @@ class VideoStorageService:
         self,
         video_url: str,
         user_id: str,
-        bookmark_id: str
+        bookmark_id: str,
+        proxy_url: str = None,
     ) -> Optional[Tuple[str, str]]:
         """
         Baixa vídeo e faz upload para Supabase Storage
@@ -70,11 +71,15 @@ class VideoStorageService:
 
             while retry_count < max_retries:
                 try:
-                    async with httpx.AsyncClient(
-                        timeout=httpx.Timeout(300.0, connect=60.0),  # 5min total, 60s connect
+                    client_kwargs = dict(
+                        timeout=httpx.Timeout(300.0, connect=60.0),
                         limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
-                        follow_redirects=True
-                    ) as client:
+                        follow_redirects=True,
+                    )
+                    if proxy_url:
+                        client_kwargs['proxy'] = proxy_url
+                        logger.info(f"🔄 Usando proxy residencial para download")
+                    async with httpx.AsyncClient(**client_kwargs) as client:
                         async with client.stream('GET', video_url) as response:
                             response.raise_for_status()
 
