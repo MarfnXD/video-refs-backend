@@ -102,6 +102,23 @@ async def process_bookmark_background(
                         ] if video_metadata.top_comments else [],
                         'platform': video_metadata.platform.value if video_metadata.platform else None,
                     }
+
+                    # Extrair carousel data do raw response do Apify
+                    if apify_raw_response and isinstance(apify_raw_response, dict):
+                        sidecar = apify_raw_response.get('childPosts') or apify_raw_response.get('sidecarMediaResources') or []
+                        if sidecar and isinstance(sidecar, list) and len(sidecar) > 1:
+                            carousel_items = []
+                            for i, item in enumerate(sidecar):
+                                carousel_items.append({
+                                    "index": i,
+                                    "type": "video" if item.get("videoUrl") or item.get("type") == "Video" else "image",
+                                    "url": item.get("videoUrl") or item.get("displayUrl") or item.get("url") or "",
+                                    "thumbnail": item.get("displayUrl") or item.get("url") or "",
+                                })
+                            metadata['carousel_items'] = carousel_items
+                            metadata['post_type'] = 'carousel'
+                            metadata['carousel_count'] = len(carousel_items)
+                            logger.info(f"🎠 [{bookmark_id[:8]}] Carousel: {len(carousel_items)} items")
                     logger.info(f"✅ Metadados extraídos: {metadata.get('title', 'N/A')[:50]}")
 
                     # Log se Apify retornou erro parcial
