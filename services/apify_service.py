@@ -864,25 +864,39 @@ class ApifyService:
             )
 
     async def extract_video_download_url_youtube(self, url: str, quality: str = "720p") -> dict:
-        """Extrai URL de download do video do YouTube via yt-dlp."""
-        import subprocess
+        """Extrai URL de download do video do YouTube via Apify actor."""
         try:
-            # yt-dlp: pegar melhor mp4 ate 720p
-            fmt = f"best[height<={quality.replace('p','')}][ext=mp4]/best[ext=mp4]/best"
-            result = subprocess.run(
-                ["yt-dlp", "--get-url", "-f", fmt, "--no-warnings", url],
-                capture_output=True, text=True, timeout=30
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                video_url = result.stdout.strip().split('\n')[0]
-                print(f"✅ YouTube video URL via yt-dlp: {video_url[:60]}")
-                return {
-                    "download_url": video_url,
-                    "file_size_mb": None,
-                    "quality": quality,
-                    "expires_in_hours": 6,
-                }
-            raise ValueError(f"yt-dlp falhou: {result.stderr[:100]}")
+            # Limpar URL
+            clean_url = self._clean_url(url)
+            video_id = self.extract_video_id_youtube(clean_url)
+            canonical_url = f"https://www.youtube.com/watch?v={video_id}" if video_id else clean_url
+
+            async def run_youtube_downloader(client: ApifyClient):
+                run = client.actor("streamers/youtube-video-downloader").call(
+                    run_input={
+                        "urls": [canonical_url],
+                        "quality": quality,
+                    },
+                    timeout_secs=120
+                )
+                items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
+                if not items:
+                    raise ValueError("YouTube downloader retornou vazio")
+                return items[0]
+
+            data = await self._try_all_clients(run_youtube_downloader, "extract_video_download_url_youtube")
+
+            video_url = data.get("url") or data.get("download_url") or data.get("videoUrl")
+            if not video_url:
+                raise ValueError(f"Actor nao retornou URL de download. Keys: {list(data.keys())}")
+
+            print(f"✅ YouTube video URL via Apify: {video_url[:60]}")
+            return {
+                "download_url": video_url,
+                "file_size_mb": data.get("size_mb"),
+                "quality": data.get("quality", quality),
+                "expires_in_hours": 6,
+            }
         except Exception as e:
             raise ValueError(f"Erro ao extrair URL de download do YouTube: {str(e)}")
 
