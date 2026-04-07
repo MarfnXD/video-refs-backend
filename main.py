@@ -166,6 +166,22 @@ async def debug_apify_status():
     }
 
 
+@app.post("/debug/clear-blacklist")
+async def debug_clear_blacklist():
+    """Temporário: limpa blacklist de tokens mortos no Redis"""
+    try:
+        rc = await apify_service.get_redis_client()
+        cleared = 0
+        for i in range(10):  # limpa até 10 slots
+            key = f"apify:dead_token:{i}"
+            if await rc.exists(key):
+                await rc.delete(key)
+                cleared += 1
+        return {"success": True, "cleared": cleared}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 @app.post("/api/extract-metadata", response_model=ExtractResponse)
 async def extract_metadata(request: ExtractRequest):
     """
