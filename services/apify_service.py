@@ -179,6 +179,22 @@ class ApifyService:
 
         return url
 
+    @staticmethod
+    def _convert_timestamp(value) -> str | None:
+        """Converte timestamp (epoch int/str ou ISO string) pra ISO 8601."""
+        if not value:
+            return None
+        from datetime import datetime, timezone
+        # Se e numero (epoch)
+        if isinstance(value, (int, float)):
+            return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
+        s = str(value).strip()
+        # Se parece epoch (so digitos, >10 chars)
+        if s.isdigit() and len(s) >= 10:
+            return datetime.fromtimestamp(int(s), tz=timezone.utc).isoformat()
+        # Ja e string ISO ou similar — retorna como esta
+        return s
+
     def detect_platform(self, url: str) -> Platform:
         if "youtube.com" in url or "youtu.be" in url:
             return Platform.YOUTUBE
@@ -834,7 +850,7 @@ class ApifyService:
                 duration=None,
                 author=author,
                 author_url=f"https://www.threads.com/@{author}" if author else None,
-                published_at=str(published) if published else None,
+                published_at=self._convert_timestamp(published),
             )
 
         except Exception as e:
