@@ -863,40 +863,75 @@ class ApifyService:
                 hashtags=[],
             )
 
-    async def extract_video_download_url_youtube(self, url: str, quality: str = "720p") -> dict:
-        """Extrai URL de download do video do YouTube via Apify actor."""
+    async def _get_youtube_cookies_path(self) -> str | None:
+        """Baixa cookies do YouTube do Supabase Storage pra arquivo temporario."""
         try:
-            # Limpar URL
+            from supabase import create_client as _create_sb
+            sb_url = os.getenv("SUPABASE_URL")
+            sb_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY")
+            if not sb_url or not sb_key:
+                return None
+
+            sb = _create_sb(sb_url, sb_key)
+            data = sb.storage.from_("thumbnails").download("system/youtube_cookies.txt")
+            if not data:
+                return None
+
+            cookies_path = "/tmp/youtube_cookies.txt"
+            with open(cookies_path, "wb") as f:
+                f.write(data)
+            print(f"🍪 Cookies do YouTube baixados ({len(data)} bytes)")
+            return cookies_path
+        except Exception as e:
+            print(f"⚠️ Sem cookies do YouTube: {e}")
+            return None
+
+    async def _mark_youtube_cookies_expired(self):
+        """Marca cookies como expirados no Redis (app mostra aviso)."""
+        try:
+            rc = await self.get_redis_client()
+            await rc.setex("youtube:cookies_expired", 86400 * 7, "1")
+            print("💀 Cookies do YouTube marcados como EXPIRADOS no Redis")
+        except Exception:
+            pass
+
+    async def extract_video_download_url_youtube(self, url: str, quality: str = "720p") -> dict:
+        """Extrai URL de download do video do YouTube via yt-dlp com cookies."""
+        import subprocess
+        try:
             clean_url = self._clean_url(url)
             video_id = self.extract_video_id_youtube(clean_url)
             canonical_url = f"https://www.youtube.com/watch?v={video_id}" if video_id else clean_url
 
-            async def run_youtube_downloader(client: ApifyClient):
-                run = client.actor("streamers/youtube-video-downloader").call(
-                    run_input={
-                        "urls": [canonical_url],
-                        "quality": quality,
-                    },
-                    timeout_secs=120
-                )
-                items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
-                if not items:
-                    raise ValueError("YouTube downloader retornou vazio")
-                return items[0]
+            # Baixar cookies do Supabase Storage
+            cookies_path = await self._get_youtube_cookies_path()
 
-            data = await self._try_all_clients(run_youtube_downloader, "extract_video_download_url_youtube")
+            # Montar comando yt-dlp
+            fmt = f"best[height<={quality.replace('p','')}][ext=mp4]/best[ext=mp4]/best"
+            cmd = ["yt-dlp", "--get-url", "-f", fmt, "--no-warnings"]
+            if cookies_path:
+                cmd.extend(["--cookies", cookies_path])
+            cmd.append(canonical_url)
 
-            video_url = data.get("url") or data.get("download_url") or data.get("videoUrl")
-            if not video_url:
-                raise ValueError(f"Actor nao retornou URL de download. Keys: {list(data.keys())}")
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
 
-            print(f"✅ YouTube video URL via Apify: {video_url[:60]}")
-            return {
-                "download_url": video_url,
-                "file_size_mb": data.get("size_mb"),
-                "quality": data.get("quality", quality),
-                "expires_in_hours": 6,
-            }
+            if result.returncode == 0 and result.stdout.strip():
+                video_url = result.stdout.strip().split('\n')[0]
+                print(f"✅ YouTube video URL via yt-dlp+cookies: {video_url[:60]}")
+                return {
+                    "download_url": video_url,
+                    "file_size_mb": None,
+                    "quality": quality,
+                    "expires_in_hours": 6,
+                }
+
+            # Detectar erro de cookies expirados
+            err = result.stderr.lower()
+            if "sign in" in err or "bot" in err or "cookies" in err:
+                await self._mark_youtube_cookies_expired()
+                raise ValueError("YouTube cookies expirados! Rode export_youtube_cookies.py no seu Mac.")
+
+            raise ValueError(f"yt-dlp falhou: {result.stderr[:100]}")
         except Exception as e:
             raise ValueError(f"Erro ao extrair URL de download do YouTube: {str(e)}")
 

@@ -166,6 +166,38 @@ async def debug_apify_status():
     }
 
 
+@app.get("/api/youtube-cookies-status")
+async def youtube_cookies_status():
+    """Verifica se cookies do YouTube estao validos."""
+    try:
+        rc = await apify_service.get_redis_client()
+        expired = await rc.exists("youtube:cookies_expired")
+        # Checar se cookies existem no Storage
+        from supabase import create_client as _sb
+        sb_url = os.getenv("SUPABASE_URL")
+        sb_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY")
+        has_cookies = False
+        meta = None
+        if sb_url and sb_key:
+            sb = _sb(sb_url, sb_key)
+            try:
+                m = sb.storage.from_("thumbnails").download("system/youtube_cookies_meta.json")
+                if m:
+                    import json as _j
+                    meta = _j.loads(m)
+                    has_cookies = True
+            except:
+                pass
+        return {
+            "cookies_uploaded": has_cookies,
+            "cookies_expired": bool(expired),
+            "exported_at": meta.get("exported_at") if meta else None,
+            "action_needed": "Rode: python3 export_youtube_cookies.py" if (expired or not has_cookies) else None,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/debug/test-ytdlp")
 async def debug_test_ytdlp():
     """Temporário: testa se yt-dlp funciona no Render"""
