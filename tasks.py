@@ -370,6 +370,10 @@ def analyze_video_gemini_task(self, previous_result: dict, bookmark_id: str, url
                 video_data = loop.run_until_complete(
                     apify_service.extract_video_download_url_x(url, quality="720p")
                 )
+            elif platform == Platform.THREADS:
+                # Threads: video_url vem do pipeline (video_download_url)
+                # Se chegou aqui sem URL, nao tem como baixar
+                raise Exception("Threads video URL nao disponivel no fallback")
             else:
                 raise Exception(f"Plataforma não suportada: {platform}")
 
@@ -626,6 +630,8 @@ def upload_to_cloud_task(self, previous_result: dict, bookmark_id: str, user_id:
                 video_data = loop.run_until_complete(
                     apify_service.extract_video_download_url_x(url, quality="720p")
                 )
+            elif platform == Platform.THREADS:
+                raise Exception("Threads video URL nao disponivel no fallback")
             else:
                 raise Exception(f"Plataforma não suportada: {platform}")
 

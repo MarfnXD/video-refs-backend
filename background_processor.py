@@ -210,6 +210,16 @@ async def process_bookmark_background(
                         logger.info(f"♻️ Instagram: reusando videoUrl do raw response (sem chamada extra)")
                     if not download_info:
                         download_info = await apify_service.extract_video_download_url_instagram(url)
+                elif 'threads.com' in url.lower() or 'threads.net' in url.lower():
+                    # Threads: raw response tem video_url do media downloader
+                    if apify_raw_response and isinstance(apify_raw_response, dict) and apify_raw_response.get('video_url'):
+                        download_info = {
+                            "download_url": apify_raw_response['video_url'],
+                            "file_size_mb": None,
+                            "quality": "original",
+                            "expires_in_hours": 2,
+                        }
+                        logger.info(f"♻️ Threads: reusando video_url do raw response")
                 elif 'x.com' in url.lower() or 'twitter.com' in url.lower():
                     # X.com: tenta raw response (extendedEntities) ou yt-dlp
                     download_info = await apify_service.extract_video_download_url_x(url)
