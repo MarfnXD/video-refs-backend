@@ -523,17 +523,11 @@ class ApifyService:
                 duration=str(data.get("videoDuration", "")) if data.get("videoDuration") else "",
                 author=data.get("ownerUsername", "Unknown"),
                 author_url=f"https://www.instagram.com/{data.get('ownerUsername', '')}" if data.get('ownerUsername') else "",
-                published_at=data.get("timestamp", "")
+                published_at=data.get("timestamp", ""),
+                post_type=post_type if carousel_items else ("video" if data.get("videoUrl") else "image"),
+                carousel_items=carousel_items if carousel_items else None,
+                carousel_count=len(carousel_items) if carousel_items else None,
             )
-
-            # Salvar carousel items no metadata extra (acessivel via metadata JSON no Supabase)
-            if carousel_items:
-                metadata_dict = metadata.dict()
-                metadata_dict["carousel_items"] = carousel_items
-                metadata_dict["post_type"] = post_type
-                metadata_dict["carousel_count"] = len(carousel_items)
-                await self.cache_set(cache_key, metadata_dict)
-                return metadata
 
             await self.cache_set(cache_key, metadata.dict())
             return metadata

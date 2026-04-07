@@ -32,3 +32,6 @@ class VideoMetadata(BaseModel):
     author: Optional[str] = None
     author_url: Optional[str] = None
     published_at: Optional[str] = None
+    post_type: Optional[str] = None  # video, image, carousel
+    carousel_items: Optional[List[dict]] = None  # [{index, type, url, thumbnail}]
+    carousel_count: Optional[int] = None
