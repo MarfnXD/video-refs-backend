@@ -863,6 +863,29 @@ class ApifyService:
                 hashtags=[],
             )
 
+    async def extract_video_download_url_youtube(self, url: str, quality: str = "720p") -> dict:
+        """Extrai URL de download do video do YouTube via yt-dlp."""
+        import subprocess
+        try:
+            # yt-dlp: pegar melhor mp4 ate 720p
+            fmt = f"best[height<={quality.replace('p','')}][ext=mp4]/best[ext=mp4]/best"
+            result = subprocess.run(
+                ["yt-dlp", "--get-url", "-f", fmt, "--no-warnings", url],
+                capture_output=True, text=True, timeout=30
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                video_url = result.stdout.strip().split('\n')[0]
+                print(f"✅ YouTube video URL via yt-dlp: {video_url[:60]}")
+                return {
+                    "download_url": video_url,
+                    "file_size_mb": None,
+                    "quality": quality,
+                    "expires_in_hours": 6,
+                }
+            raise ValueError(f"yt-dlp falhou: {result.stderr[:100]}")
+        except Exception as e:
+            raise ValueError(f"Erro ao extrair URL de download do YouTube: {str(e)}")
+
     async def extract_video_download_url_tiktok(self, url: str, quality: str = "480p") -> dict:
         """
         Extrai URL de download direto do vídeo do TikTok.
