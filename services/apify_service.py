@@ -895,29 +895,38 @@ class ApifyService:
         except Exception:
             pass
 
+    def _get_apify_proxy_url(self) -> str | None:
+        """Retorna URL do proxy residencial do Apify."""
+        proxy_pass = os.getenv("APIFY_PROXY_PASSWORD")
+        if proxy_pass:
+            return f"http://groups-RESIDENTIAL:{proxy_pass}@proxy.apify.com:8000"
+        return None
+
     async def extract_video_download_url_youtube(self, url: str, quality: str = "720p") -> dict:
-        """Extrai URL de download do video do YouTube via yt-dlp com cookies."""
+        """Extrai URL de download do video do YouTube via yt-dlp + proxy residencial Apify."""
         import subprocess
         try:
             clean_url = self._clean_url(url)
             video_id = self.extract_video_id_youtube(clean_url)
             canonical_url = f"https://www.youtube.com/watch?v={video_id}" if video_id else clean_url
 
-            # Baixar cookies do Supabase Storage
-            cookies_path = await self._get_youtube_cookies_path()
-
-            # Montar comando yt-dlp
+            # Montar comando yt-dlp com proxy residencial
             fmt = f"best[height<={quality.replace('p','')}][ext=mp4]/best[ext=mp4]/best"
             cmd = ["yt-dlp", "--get-url", "-f", fmt, "--no-warnings"]
-            if cookies_path:
-                cmd.extend(["--cookies", cookies_path])
+
+            # Proxy residencial Apify (bypass YouTube bot detection)
+            proxy = self._get_apify_proxy_url()
+            if proxy:
+                cmd.extend(["--proxy", proxy])
+                print(f"🔄 YouTube: usando Apify residential proxy")
+
             cmd.append(canonical_url)
 
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
 
             if result.returncode == 0 and result.stdout.strip():
                 video_url = result.stdout.strip().split('\n')[0]
-                print(f"✅ YouTube video URL via yt-dlp+cookies: {video_url[:60]}")
+                print(f"✅ YouTube video URL via yt-dlp+proxy: {video_url[:60]}")
                 return {
                     "download_url": video_url,
                     "file_size_mb": None,
@@ -925,13 +934,7 @@ class ApifyService:
                     "expires_in_hours": 6,
                 }
 
-            # Detectar erro de cookies expirados
-            err = result.stderr.lower()
-            if "sign in" in err or "bot" in err or "cookies" in err:
-                await self._mark_youtube_cookies_expired()
-                raise ValueError("YouTube cookies expirados! Rode export_youtube_cookies.py no seu Mac.")
-
-            raise ValueError(f"yt-dlp falhou: {result.stderr[:100]}")
+            raise ValueError(f"yt-dlp falhou: {result.stderr[:150]}")
         except Exception as e:
             raise ValueError(f"Erro ao extrair URL de download do YouTube: {str(e)}")
 
