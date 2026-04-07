@@ -166,6 +166,31 @@ async def debug_apify_status():
     }
 
 
+@app.get("/debug/test-ytdlp")
+async def debug_test_ytdlp():
+    """Temporário: testa se yt-dlp funciona no Render"""
+    import subprocess
+    try:
+        # Testar versao
+        ver = subprocess.run(["yt-dlp", "--version"], capture_output=True, text=True, timeout=10)
+        version = ver.stdout.strip() if ver.returncode == 0 else f"erro: {ver.stderr[:50]}"
+
+        # Testar extração de URL (shorts curto)
+        result = subprocess.run(
+            ["yt-dlp", "--get-url", "-f", "best[ext=mp4]/best", "--no-warnings", "https://youtube.com/shorts/SB-rfAuNkHE"],
+            capture_output=True, text=True, timeout=30
+        )
+        url_ok = bool(result.returncode == 0 and result.stdout.strip())
+        return {
+            "yt_dlp_version": version,
+            "test_url_extracted": url_ok,
+            "url_preview": result.stdout.strip()[:80] if url_ok else None,
+            "error": result.stderr[:100] if not url_ok else None,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.post("/debug/clear-blacklist")
 async def debug_clear_blacklist():
     """Temporário: limpa blacklist de tokens mortos no Redis"""
