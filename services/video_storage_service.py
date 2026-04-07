@@ -153,6 +153,36 @@ class VideoStorageService:
 
             return None
 
+    async def upload_video_from_file(
+        self, file_path: str, user_id: str, bookmark_id: str
+    ) -> Optional[Tuple[str, str]]:
+        """Upload video de arquivo local pro Supabase Storage."""
+        try:
+            storage_path = f"{user_id}/{bookmark_id}.mp4"
+            with open(file_path, 'rb') as f:
+                video_data = f.read()
+
+            file_size_mb = len(video_data) / (1024 * 1024)
+            logger.info(f"☁️ Upload de arquivo local ({file_size_mb:.1f}MB) para {storage_path}")
+
+            self.supabase.storage.from_(self.bucket_name).upload(
+                path=storage_path, file=video_data,
+                file_options={"content-type": "video/mp4"}
+            )
+
+            signed = self.supabase.storage.from_(self.bucket_name).create_signed_url(
+                path=storage_path, expires_in=31536000
+            )
+            cloud_url = signed.get('signedURL')
+            if not cloud_url:
+                return None
+
+            logger.info(f"✅ Upload local concluído: {cloud_url[:50]}...")
+            return (cloud_url, file_path)
+        except Exception as e:
+            logger.error(f"❌ Erro no upload de arquivo local: {e}")
+            return None
+
     def cleanup_temp_file(self, temp_path: str):
         """
         Deleta arquivo temporário

@@ -233,15 +233,35 @@ async def process_bookmark_background(
                     # 3.2: Download + Upload para Supabase Storage
                     logger.info(f"☁️ Baixando e fazendo upload para Supabase Storage...")
 
-                    # YouTube precisa de proxy residencial pro download
-                    yt_proxy = apify_service._get_apify_proxy_url() if ('youtube' in url.lower() or 'youtu.be' in url.lower()) else None
-
-                    upload_result = await video_storage_service.download_and_upload_video(
-                        video_url=video_download_url,
-                        user_id=user_id,
-                        bookmark_id=bookmark_id,
-                        proxy_url=yt_proxy,
-                    )
+                    # YouTube: usar yt-dlp pra download direto (httpx falha nos redirects do googlevideo)
+                    if 'youtube' in url.lower() or 'youtu.be' in url.lower():
+                        import subprocess, tempfile as _tf
+                        yt_proxy = apify_service._get_apify_proxy_url()
+                        _tmp = _tf.NamedTemporaryFile(delete=False, suffix='.mp4', dir='/tmp')
+                        _tmp_path = _tmp.name
+                        _tmp.close()
+                        _cmd = ["yt-dlp", "-f", "best[ext=mp4]/best", "--no-warnings", "-o", _tmp_path]
+                        if yt_proxy:
+                            _cmd.extend(["--proxy", yt_proxy])
+                        _cmd.append(video_download_url)
+                        logger.info(f"🎬 YouTube: baixando via yt-dlp+proxy direto...")
+                        _result = subprocess.run(_cmd, capture_output=True, text=True, timeout=300)
+                        if _result.returncode == 0 and os.path.exists(_tmp_path) and os.path.getsize(_tmp_path) > 10000:
+                            _size = os.path.getsize(_tmp_path) / (1024 * 1024)
+                            logger.info(f"✅ YouTube video baixado: {_size:.1f}MB")
+                            # Upload pro Supabase Storage
+                            upload_result = await video_storage_service.upload_video_from_file(
+                                file_path=_tmp_path, user_id=user_id, bookmark_id=bookmark_id
+                            )
+                        else:
+                            logger.error(f"❌ yt-dlp download falhou: {_result.stderr[:100]}")
+                            upload_result = None
+                    else:
+                        upload_result = await video_storage_service.download_and_upload_video(
+                            video_url=video_download_url,
+                            user_id=user_id,
+                            bookmark_id=bookmark_id,
+                        )
 
                     if upload_result:
                         cloud_video_url, temp_video_path = upload_result
