@@ -366,6 +366,10 @@ def analyze_video_gemini_task(self, previous_result: dict, bookmark_id: str, url
                 video_data = loop.run_until_complete(
                     apify_service.extract_video_download_url_tiktok(url, quality="720p")
                 )
+            elif platform == Platform.X:
+                video_data = loop.run_until_complete(
+                    apify_service.extract_video_download_url_x(url, quality="720p")
+                )
             else:
                 raise Exception(f"Plataforma não suportada: {platform}")
 
@@ -617,6 +621,10 @@ def upload_to_cloud_task(self, previous_result: dict, bookmark_id: str, user_id:
             elif platform == Platform.TIKTOK:
                 video_data = loop.run_until_complete(
                     apify_service.extract_video_download_url_tiktok(url, quality="720p")
+                )
+            elif platform == Platform.X:
+                video_data = loop.run_until_complete(
+                    apify_service.extract_video_download_url_x(url, quality="720p")
                 )
             else:
                 raise Exception(f"Plataforma não suportada: {platform}")

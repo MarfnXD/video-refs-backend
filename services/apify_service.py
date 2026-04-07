@@ -615,6 +615,9 @@ class ApifyService:
                 import json as _json
                 data = _json.loads(data)
 
+            # Salva resposta bruta (inclui video URLs pra reuso no upload)
+            self.last_raw_response = data
+
             # Campos do apidojo/tweet-scraper
             text = data.get("text") or data.get("fullText") or ""
 
@@ -905,6 +908,53 @@ class ApifyService:
 
         except Exception as e:
             raise ValueError(f"Erro ao extrair URL de download do TikTok: {str(e)}")
+
+    async def extract_video_download_url_x(self, url: str, quality: str = "480p") -> dict:
+        """Extrai URL de download do video do X.com via yt-dlp."""
+        import subprocess
+        try:
+            # Primeiro tenta extrair do raw response (extendedEntities.media[].video_info)
+            raw = self.last_raw_response
+            if raw and isinstance(raw, dict):
+                ext_entities = raw.get("extendedEntities") or {}
+                ext_media = ext_entities.get("media") or []
+                for m in ext_media:
+                    if isinstance(m, dict) and m.get("video_info"):
+                        variants = m["video_info"].get("variants", [])
+                        # Pegar melhor qualidade MP4
+                        mp4s = [v for v in variants if v.get("content_type") == "video/mp4"]
+                        if mp4s:
+                            best = max(mp4s, key=lambda v: v.get("bitrate", 0))
+                            video_url = best.get("url")
+                            if video_url:
+                                print(f"✅ X.com video URL via raw response: {video_url[:60]}")
+                                return {
+                                    "download_url": video_url,
+                                    "file_size_mb": None,
+                                    "quality": "original",
+                                    "expires_in_hours": 24,
+                                }
+
+            # Fallback: yt-dlp
+            print(f"🔄 X.com: tentando yt-dlp para {url[:60]}")
+            result = subprocess.run(
+                ["yt-dlp", "--get-url", "-f", "best[ext=mp4]", "--no-warnings", url],
+                capture_output=True, text=True, timeout=30
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                video_url = result.stdout.strip().split('\n')[0]
+                print(f"✅ X.com video URL via yt-dlp: {video_url[:60]}")
+                return {
+                    "download_url": video_url,
+                    "file_size_mb": None,
+                    "quality": quality,
+                    "expires_in_hours": 6,
+                }
+
+            raise ValueError(f"yt-dlp falhou: {result.stderr[:100]}")
+
+        except Exception as e:
+            raise ValueError(f"Erro ao extrair URL de download do X.com: {str(e)}")
 
     async def extract_video_download_url_instagram(self, url: str, quality: str = "480p") -> dict:
         """

@@ -210,6 +210,9 @@ async def process_bookmark_background(
                         logger.info(f"♻️ Instagram: reusando videoUrl do raw response (sem chamada extra)")
                     if not download_info:
                         download_info = await apify_service.extract_video_download_url_instagram(url)
+                elif 'x.com' in url.lower() or 'twitter.com' in url.lower():
+                    # X.com: tenta raw response (extendedEntities) ou yt-dlp
+                    download_info = await apify_service.extract_video_download_url_x(url)
                 elif 'youtube' in url.lower() or 'youtu.be' in url.lower():
                     download_info = await apify_service.extract_video_download_url_youtube(url)
 
